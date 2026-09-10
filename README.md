@@ -35,6 +35,19 @@ No build step, no dependencies, no external JS — just two files.
 
 ## Geometry reference
 
-Matches the visual layout of the original Arduining "Punched Tape" PDF:
-25 mm tape width, one clock hole and one data hole per row, holes on an
-8 mm row pitch, 8 rows per byte with a marked fold/cut point between bytes.
+Measured directly from a 300dpi render of the original Arduining
+"Punched Tape" PDF (not estimated):
+
+- Tape width: 25 mm
+- Row pitch (clock-to-clock along the strip): **6.06 mm** — this is the
+  tape's real "clock rate": each row is one clock pulse in the reader
+  sketch, so this pitch is what "how fast you pull the tape" becomes
+  electrically
+- Hole diameter (clock and data, same size): 5.77 mm
+- Clock hole track: 6.30 mm in from its edge of the strip
+- Data hole track: 6.00 mm in from the *opposite* edge of the strip
+- 8 rows per byte, with a marked fold/cut point between bytes
+
+Clock and data holes sit on opposite edges of the strip at (almost
+exactly) the same position along the tape's length — not offset
+diagonally within a row.
