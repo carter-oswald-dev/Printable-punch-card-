@@ -7,11 +7,23 @@ the 2-pin (clock + data) circuit and sketch used with a 25 mm paper strip.
 **Live tool:** open `index.html` directly, or host it via GitHub Pages
 (Settings → Pages → deploy from this branch, root folder).
 
+## How the tape actually encodes a bit
+
+Only the **circle** is a real hole. It's the clock/sprocket track that
+physically drives the reader, and it's punched on every single row no
+matter what the data bit is.
+
+The **square** next to it is not a hole — it's a blank cell you fill in
+by hand with a pen. Ink it solid for a `1`; leave it blank for a `0`.
+This tool prints the squares already filled in or left blank according to
+your data, so — depending on your reader's sensing method — you may be
+able to use the sheet straight off the printer with no inking step at all.
+
 ## What it does
 
 - Encodes typed text, hex bytes, or a repeating test pattern into the
-  clock/data hole pattern the reader expects (MSB-first, one clock pulse +
-  one data bit per row, 8 rows per byte).
+  clock-hole-and-data-cell pattern the reader expects (MSB-first, one
+  clock pulse + one data bit per row, 8 rows per byte).
 - Lets you fix the tape to an exact physical length (cm / mm / inches) or a
   byte count, padding with blank rows as needed.
 - Tiles long tapes across as many sheets as needed (US Letter or A4), always
@@ -43,11 +55,11 @@ Measured directly from a 300dpi render of the original Arduining
   tape's real "clock rate": each row is one clock pulse in the reader
   sketch, so this pitch is what "how fast you pull the tape" becomes
   electrically
-- Hole diameter (clock and data, same size): 5.77 mm
+- Clock hole diameter: 5.77 mm (same size used for the data cell square)
 - Clock hole track: 6.30 mm in from its edge of the strip
-- Data hole track: 6.00 mm in from the *opposite* edge of the strip
+- Data cell track: 6.00 mm in from the *opposite* edge of the strip
 - 8 rows per byte, with a marked fold/cut point between bytes
 
-Clock and data holes sit on opposite edges of the strip at (almost
-exactly) the same position along the tape's length — not offset
-diagonally within a row.
+The clock hole and its same-row data cell sit on opposite edges of the
+strip at (almost exactly) the same position along the tape's length —
+not offset diagonally within a row.

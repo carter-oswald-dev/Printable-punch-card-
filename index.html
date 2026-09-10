@@ -298,10 +298,10 @@
     <h1>Turn text into paper tape, printed at true size</h1>
     <p class="lede">
       Set a length, type your data, and get print-ready sheets whose cut and glue
-      lines always land between bytes — never through a hole. Every strip stays
-      <code>25 mm</code> wide and matches the clock/data hole spacing of the
-      original <code>PunchCardReader</code> sketch, so sheets you join keep
-      perfect pitch across the seam.
+      lines always land between bytes — never through a clock hole or a data cell.
+      Every strip stays <code>25 mm</code> wide and matches the clock-hole and
+      data-cell spacing of the original <code>PunchCardReader</code> sketch, so
+      sheets you join keep perfect pitch across the seam.
     </p>
   </div>
 </header>
@@ -354,8 +354,8 @@
         <div class="row2">
           <select id="pattern-byte">
             <option value="10101010">10101010 (alternating)</option>
-            <option value="11111111">11111111 (all holes)</option>
-            <option value="00000000">00000000 (no holes)</option>
+            <option value="11111111">11111111 (all filled in)</option>
+            <option value="00000000">00000000 (all blank)</option>
             <option value="11000011">11000011</option>
           </select>
           <input type="number" id="pattern-count" value="16" min="1" max="2000">
@@ -460,15 +460,20 @@
     </div>
     <div class="legend">
       <span><span class="swatch" style="background:#E8A33D"></span> tape / paper</span>
-      <span><span class="swatch" style="background:#1B1D22; border-radius:50%"></span> clock hole (always present)</span>
-      <span><span class="swatch" style="background:#fff; border:1px solid #999"></span> data hole (bit = 1)</span>
+      <span><span class="swatch" style="background:#1B1D22; border-radius:50%"></span> clock hole — real, punched, on every row</span>
+      <span><span class="swatch" style="background:#1B1D22"></span> data cell filled in — bit = 1</span>
+      <span><span class="swatch" style="background:#fff; border:1px solid #999"></span> data cell left blank — bit = 0</span>
       <span><span class="swatch" style="background:#C2452D"></span> cut / fold line — always on a byte boundary</span>
     </div>
   </section>
 </main>
 
 <footer>
-  Hole spacing and the clock+data layout follow the original
+  The clock hole is the only real hole in the paper — it's the sprocket
+  track that drives the reader and is punched on every row, whether the
+  data bit is 0 or 1. The square next to it isn't a hole: it's a cell a
+  human fills in with ink to write the data bit — solid = 1, blank = 0.
+  Layout follows the original
   <a href="https://arduining.com" target="_blank" rel="noopener">Arduining.com</a> punched-tape reader design —
   one clock pulse and one data bit per row, 8 rows per byte. Print at 100% / actual size —
   disable "fit to page" in your print dialog, or the tape will scale off-pitch.

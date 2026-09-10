@@ -1,9 +1,16 @@
 /* ===========================================================
    Tape Punch — punch-tape generator
    Geometry matches the Arduining.com "Punched Tape" reference PDF,
-   measured directly from a 300dpi render of the source artwork:
-   one clock hole + one data hole per row, on opposite edge tracks
-   of the strip, 8 rows per byte, tape at a fixed 25mm width.
+   measured directly from a 300dpi render of the source artwork.
+
+   Only the CIRCLE is a real physical hole: it's the clock/sprocket
+   track that drives the reader, and it's punched on every single
+   row regardless of data value. The SQUARE next to it is not a
+   hole at all — it's a blank cell a human fills in by hand with
+   ink to write the data bit (filled in = 1, left blank = 0). The
+   reader's photodiode/switch on the data pin reads "ink present"
+   vs "no ink" the same way it would read "hole" vs "no hole" on a
+   machine-punched tape.
 
    ROW_PITCH_MM is the mechanically important number: it's what
    "how fast the tape is pulled through the reader" turns into
@@ -14,16 +21,17 @@
 
 // ---------- Physical constants (mm) ----------
 // Measured from the reference PDF at 300dpi (11.811 px/mm):
-//   row pitch (clock-to-clock along strip axis)   ≈ 71.6 px → 6.06 mm
-//   hole diameter (clock & data, same size)        ≈ 68.2 px → 5.77 mm
-//   clock-track inset from its edge                ≈ 74.4 px → 6.30 mm
+//   row pitch (clock-to-clock along strip axis)    ≈ 71.6 px → 6.06 mm
+//   circle diameter (the only real hole)            ≈ 68.2 px → 5.77 mm
+//   square size (hand-inked data cell, same size)   ≈ 68.2 px → 5.77 mm
+//   clock-track inset from its edge                 ≈ 74.4 px → 6.30 mm
 //   data-track inset from its (opposite) edge       ≈ 70.9 px → 6.00 mm
-//   along-axis stagger, clock vs its same-row data ≈  4.9 px → 0.41 mm (negligible — treated as 0)
+//   along-axis stagger, clock vs its same-row data  ≈  4.9 px → 0.41 mm (negligible — treated as 0)
 const TAPE_WIDTH_MM     = 25.0;   // strip width, matches reference PDF
 const ROW_PITCH_MM      = 6.06;   // the tape's "clock rate" — distance between successive clock pulses
-const HOLE_DIAM_MM      = 5.77;   // clock + data hole diameter
-const CLOCK_INSET_MM    = 6.30;   // clock-track distance from its edge of the strip
-const DATA_INSET_MM     = 6.00;   // data-track distance from its (opposite) edge of the strip
+const HOLE_DIAM_MM      = 5.77;   // clock hole diameter, and matching size for the data cell square
+const CLOCK_INSET_MM    = 6.30;   // clock hole track distance from its edge of the strip
+const DATA_INSET_MM     = 6.00;   // data cell track distance from its (opposite) edge of the strip
 const DIAGONAL_DEG      = 42;     // visual diagonal angle of the strip, matches reference art
 const BYTE_ROWS         = 8;
 
@@ -239,31 +247,34 @@ function drawRow(laneG, x, rowData, isOverlapRow, joinMode) {
   const rowG = svgEl("g", { opacity: opacity });
   laneG.appendChild(rowG);
 
-  // Clock and data holes sit on opposite edge tracks of the strip, at
-  // (almost exactly) the same along-axis position — matching the measured
-  // reference geometry, not offset diagonally within the row.
+  // The circle is the ONLY real hole in the paper — the clock/sprocket
+  // track that physically drives the reader, punched on every single row
+  // regardless of data value. The square is not a hole at all: it's a
+  // blank cell a human fills in by hand with ink to write a data bit.
+  // Filled in (solid) = 1. Left blank = 0.
   const clockY = CLOCK_INSET_MM;
   const dataY = TAPE_WIDTH_MM - DATA_INSET_MM;
   const r = HOLE_DIAM_MM / 2;
 
-  // clock hole: always punched (solid dark circle = a real hole in the paper)
+  // clock hole: always punched, every row, no matter the data value
   rowG.appendChild(svgEl("circle", {
     cx: x, cy: clockY, r: r,
     fill: "#1B1D22"
   }));
 
-  // data hole: white/cut-out square if bit=1, solid tape (no hole) if bit=0
+  // data cell: a square outline to write in by hand, not a hole
   if (rowData.bit === 1) {
+    // pre-filled to show a "1" — printed solid, as if already inked
     rowG.appendChild(svgEl("rect", {
       x: x - r, y: dataY - r, width: r * 2, height: r * 2,
-      fill: "#ffffff", stroke: "#8a5a12", "stroke-width": 0.25
+      fill: "#1B1D22", stroke: "#1B1D22", "stroke-width": 0.25
     }));
   } else {
-    // faint guide circle showing where a hole *could* go, so alignment is
-    // still visible without implying a punch
+    // blank cell for a "0" — just the outline, left empty for the tape
+    // to read as 0 (or for a human to leave un-inked)
     rowG.appendChild(svgEl("rect", {
       x: x - r, y: dataY - r, width: r * 2, height: r * 2,
-      fill: "none", stroke: "#c98a2e", "stroke-width": 0.25, "stroke-dasharray": "0.6,0.6"
+      fill: "none", stroke: "#8a5a12", "stroke-width": 0.35
     }));
   }
 
