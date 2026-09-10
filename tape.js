@@ -1,18 +1,31 @@
 /* ===========================================================
    Tape Punch — punch-tape generator
-   Geometry matches the Arduining.com "Punched Tape" reference:
-   one clock hole + one data hole per row, 8 rows per byte,
-   tape running diagonally at a fixed 25mm width.
+   Geometry matches the Arduining.com "Punched Tape" reference PDF,
+   measured directly from a 300dpi render of the source artwork:
+   one clock hole + one data hole per row, on opposite edge tracks
+   of the strip, 8 rows per byte, tape at a fixed 25mm width.
+
+   ROW_PITCH_MM is the mechanically important number: it's what
+   "how fast the tape is pulled through the reader" turns into
+   electrically. Every clock pulse in the sketch corresponds to
+   one row here, so this pitch is the tape's real "clock rate" in
+   physical space.
    =========================================================== */
 
 // ---------- Physical constants (mm) ----------
-const TAPE_WIDTH_MM   = 25.0;   // strip width, matches reference PDF
-const ROW_PITCH_MM    = 8.0;    // vertical distance between successive rows along the strip's long axis
-const HOLE_DIAM_MM    = 5.2;    // clock + data hole diameter
-const TRACK_INSET_MM  = 6.2;    // distance from each long edge to hole center line
-const STAGGER_MM      = 5.0;    // horizontal (across-strip) offset between clock and data hole within a row
-const DIAGONAL_DEG    = 42;     // visual diagonal angle of the strip, matches reference art
-const BYTE_ROWS       = 8;
+// Measured from the reference PDF at 300dpi (11.811 px/mm):
+//   row pitch (clock-to-clock along strip axis)   ≈ 71.6 px → 6.06 mm
+//   hole diameter (clock & data, same size)        ≈ 68.2 px → 5.77 mm
+//   clock-track inset from its edge                ≈ 74.4 px → 6.30 mm
+//   data-track inset from its (opposite) edge       ≈ 70.9 px → 6.00 mm
+//   along-axis stagger, clock vs its same-row data ≈  4.9 px → 0.41 mm (negligible — treated as 0)
+const TAPE_WIDTH_MM     = 25.0;   // strip width, matches reference PDF
+const ROW_PITCH_MM      = 6.06;   // the tape's "clock rate" — distance between successive clock pulses
+const HOLE_DIAM_MM      = 5.77;   // clock + data hole diameter
+const CLOCK_INSET_MM    = 6.30;   // clock-track distance from its edge of the strip
+const DATA_INSET_MM     = 6.00;   // data-track distance from its (opposite) edge of the strip
+const DIAGONAL_DEG      = 42;     // visual diagonal angle of the strip, matches reference art
+const BYTE_ROWS         = 8;
 
 // ---------- Paper sizes (mm) ----------
 const PAPER = {
@@ -226,8 +239,11 @@ function drawRow(laneG, x, rowData, isOverlapRow, joinMode) {
   const rowG = svgEl("g", { opacity: opacity });
   laneG.appendChild(rowG);
 
-  const clockY = TRACK_INSET_MM;
-  const dataY = TAPE_WIDTH_MM - TRACK_INSET_MM;
+  // Clock and data holes sit on opposite edge tracks of the strip, at
+  // (almost exactly) the same along-axis position — matching the measured
+  // reference geometry, not offset diagonally within the row.
+  const clockY = CLOCK_INSET_MM;
+  const dataY = TAPE_WIDTH_MM - DATA_INSET_MM;
   const r = HOLE_DIAM_MM / 2;
 
   // clock hole: always punched (solid dark circle = a real hole in the paper)
