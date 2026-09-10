@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tape Punch — printable punch-card tape generator</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root{
+    --paper:#F7F4EC;
+    --paper-dim:#EDE8DA;
+    --ink:#1B1D22;
+    --ink-soft:#5B5A54;
+    --amber:#E8A33D;
+    --amber-dark:#C97F1E;
+    --teal:#3E6B64;
+    --teal-dark:#2C4E49;
+    --cut:#C2452D;
+    --line:#D8D2C0;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    line-height:1.5;
+  }
+
+  a{ color:var(--teal-dark); }
+
+  /* ---------- Header ---------- */
+  header.hero{
+    padding:3.2rem 1.5rem 2.4rem;
+    border-bottom:1px solid var(--line);
+    background:
+      repeating-linear-gradient(
+        135deg,
+        transparent 0 26px,
+        rgba(232,163,61,0.10) 26px 27px,
+        transparent 27px 52px
+      ),
+      var(--paper);
+  }
+  .hero-inner{ max-width:920px; margin:0 auto; }
+  .eyebrow-row{
+    display:flex; align-items:center; gap:.6rem;
+    font-family:var(--mono);
+    font-size:.8rem;
+    color:var(--ink-soft);
+    margin-bottom:1.1rem;
+  }
+  .eyebrow-row .dot{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--amber-dark);
+    display:inline-block;
+  }
+  h1{
+    font-family:var(--sans);
+    font-weight:700;
+    font-size:clamp(2.1rem, 5vw, 3.1rem);
+    letter-spacing:-0.02em;
+    margin:0 0 .7rem;
+    max-width:14ch;
+  }
+  .hero p.lede{
+    font-size:1.08rem;
+    color:var(--ink-soft);
+    max-width:56ch;
+    margin:0;
+  }
+  .hero code{
+    font-family:var(--mono);
+    background:var(--paper-dim);
+    padding:.1rem .35rem;
+    border-radius:3px;
+    font-size:.92em;
+  }
+
+  /* ---------- Layout ---------- */
+  main{
+    max-width:1180px;
+    margin:0 auto;
+    padding:2.4rem 1.5rem 5rem;
+    display:grid;
+    grid-template-columns: 360px 1fr;
+    gap:2.4rem;
+    align-items:start;
+  }
+  @media (max-width: 880px){
+    main{ grid-template-columns:1fr; }
+  }
+
+  .panel{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:1.5rem;
+  }
+  .panel + .panel{ margin-top:1.4rem; }
+
+  .panel h2{
+    font-size:.78rem;
+    font-family:var(--mono);
+    text-transform:none;
+    letter-spacing:0.02em;
+    color:var(--teal-dark);
+    margin:0 0 1.1rem;
+    padding-bottom:.7rem;
+    border-bottom:1px solid var(--line);
+  }
+
+  label.field{
+    display:block;
+    margin-bottom:1.1rem;
+  }
+  label.field:last-child{ margin-bottom:0; }
+  .field-label{
+    display:block;
+    font-size:.86rem;
+    font-weight:600;
+    margin-bottom:.4rem;
+  }
+  .field-hint{
+    display:block;
+    font-size:.78rem;
+    color:var(--ink-soft);
+    margin-top:.35rem;
+    line-height:1.4;
+  }
+
+  textarea, input[type=text], input[type=number], select{
+    width:100%;
+    font-family:var(--mono);
+    font-size:.92rem;
+    padding:.6rem .7rem;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:var(--paper);
+    color:var(--ink);
+  }
+  textarea:focus, input:focus, select:focus{
+    outline:2px solid var(--teal);
+    outline-offset:1px;
+    border-color:var(--teal);
+  }
+  textarea{ min-height:88px; resize:vertical; }
+
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:.8rem; }
+
+  .radio-group{ display:flex; flex-direction:column; gap:.5rem; }
+  .radio-opt{
+    display:flex; align-items:flex-start; gap:.55rem;
+    font-size:.88rem;
+    cursor:pointer;
+    padding:.5rem .6rem;
+    border:1px solid var(--line);
+    border-radius:6px;
+  }
+  .radio-opt:has(input:checked){
+    border-color:var(--teal);
+    background:rgba(62,107,100,0.06);
+  }
+  .radio-opt input{ margin-top:.2rem; accent-color:var(--teal); }
+  .radio-opt .opt-title{ font-weight:600; display:block; }
+  .radio-opt .opt-sub{ color:var(--ink-soft); font-size:.8rem; display:block; margin-top:.1rem; }
+
+  button.primary{
+    width:100%;
+    background:var(--teal-dark);
+    color:#fff;
+    border:none;
+    border-radius:6px;
+    padding:.8rem 1rem;
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:.94rem;
+    cursor:pointer;
+    transition:background .15s ease;
+  }
+  button.primary:hover{ background:var(--teal); }
+
+  button.secondary{
+    width:100%;
+    background:transparent;
+    color:var(--ink);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:.7rem 1rem;
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:.9rem;
+    cursor:pointer;
+    margin-top:.6rem;
+  }
+  button.secondary:hover{ border-color:var(--teal); color:var(--teal-dark); }
+
+  /* stat strip */
+  .stats{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:.8rem;
+    margin-top:1.2rem;
+  }
+  .stat{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:.7rem .6rem;
+  }
+  .stat .n{ font-family:var(--mono); font-size:1.25rem; font-weight:700; display:block; }
+  .stat .l{ font-size:.72rem; color:var(--ink-soft); }
+
+  /* ---------- Preview ---------- */
+  .preview-toolbar{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:1rem; flex-wrap:wrap;
+    margin-bottom:1.1rem;
+  }
+  .preview-toolbar .title{
+    font-family:var(--mono); font-size:.85rem; color:var(--ink-soft);
+  }
+  .zoom-controls{ display:flex; gap:.4rem; align-items:center; }
+  .zoom-controls button{
+    background:#fff; border:1px solid var(--line); border-radius:5px;
+    width:28px; height:28px; cursor:pointer; font-size:.9rem;
+  }
+
+  #sheets-scroll{
+    overflow-x:auto;
+    padding:1rem 0 .5rem;
+    background:var(--paper-dim);
+    border-radius:10px;
+    border:1px solid var(--line);
+  }
+  #sheets{
+    display:flex;
+    gap:26px;
+    padding:0 1.2rem;
+    width:max-content;
+  }
+
+  .sheet{
+    background:#fff;
+    box-shadow:0 1px 4px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+    flex:0 0 auto;
+  }
+
+  .sheet-label{
+    font-family:var(--mono);
+    font-size:.7rem;
+    color:var(--ink-soft);
+    text-align:center;
+    margin-bottom:.35rem;
+  }
+  .sheet-wrap{ display:flex; flex-direction:column; align-items:center; }
+
+  /* legend */
+  .legend{
+    display:flex; gap:1.4rem; flex-wrap:wrap;
+    margin-top:1.1rem;
+    font-size:.8rem;
+    color:var(--ink-soft);
+  }
+  .legend span{ display:inline-flex; align-items:center; gap:.4rem; }
+  .swatch{ width:14px; height:14px; border-radius:3px; display:inline-block; }
+
+  footer{
+    max-width:1180px; margin:0 auto; padding:0 1.5rem 3rem;
+    color:var(--ink-soft); font-size:.82rem;
+  }
+  footer a{ color:inherit; text-decoration:underline; }
+
+  /* ---------- Print ---------- */
+  @media print{
+    header.hero, main > aside, .panel, footer, .preview-toolbar, #sheets-scroll{ display:none !important; }
+    #print-root{ display:block !important; }
+    body{ background:#fff; }
+  }
+  #print-root{ display:none; }
+  .print-page{
+    width:8.5in; height:11in;
+    page-break-after:always;
+    position:relative;
+  }
+  .print-page:last-child{ page-break-after:auto; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="eyebrow-row"><span class="dot"></span> punch tape generator for the Arduining reader</div>
+    <h1>Turn text into paper tape, printed at true size</h1>
+    <p class="lede">
+      Set a length, type your data, and get print-ready sheets whose cut and glue
+      lines always land between bytes — never through a hole. Every strip stays
+      <code>25 mm</code> wide and matches the clock/data hole spacing of the
+      original <code>PunchCardReader</code> sketch, so sheets you join keep
+      perfect pitch across the seam.
+    </p>
+  </div>
+</header>
+
+<main>
+  <aside>
+    <div class="panel">
+      <h2>01 — data</h2>
+
+      <label class="field">
+        <span class="field-label">Encoding source</span>
+        <div class="radio-group" id="source-mode">
+          <label class="radio-opt">
+            <input type="radio" name="mode" value="text" checked>
+            <span>
+              <span class="opt-title">Text</span>
+              <span class="opt-sub">Each character becomes one byte, MSB first — matches the reader's shift-in order.</span>
+            </span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mode" value="bytes">
+            <span>
+              <span class="opt-title">Raw bytes (hex)</span>
+              <span class="opt-sub">Space-separated hex pairs, e.g. <code>48 65 6C 6C 6F</code></span>
+            </span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mode" value="pattern">
+            <span>
+              <span class="opt-title">Repeating test pattern</span>
+              <span class="opt-sub">For calibrating a reader — no message, just a fixed byte repeated.</span>
+            </span>
+          </label>
+        </div>
+      </label>
+
+      <label class="field" id="text-field">
+        <span class="field-label">Message</span>
+        <textarea id="text-input" placeholder="Hello, world!">Hello, world!</textarea>
+      </label>
+
+      <label class="field" id="hex-field" style="display:none">
+        <span class="field-label">Hex bytes</span>
+        <textarea id="hex-input" placeholder="48 65 6C 6C 6F">48 65 6C 6C 6F</textarea>
+        <span class="field-hint">Invalid or odd characters are ignored.</span>
+      </label>
+
+      <label class="field" id="pattern-field" style="display:none">
+        <span class="field-label">Repeated byte</span>
+        <div class="row2">
+          <select id="pattern-byte">
+            <option value="10101010">10101010 (alternating)</option>
+            <option value="11111111">11111111 (all holes)</option>
+            <option value="00000000">00000000 (no holes)</option>
+            <option value="11000011">11000011</option>
+          </select>
+          <input type="number" id="pattern-count" value="16" min="1" max="2000">
+        </div>
+        <span class="field-hint">Byte value, and how many times to repeat it.</span>
+      </label>
+    </div>
+
+    <div class="panel">
+      <h2>02 — tape length</h2>
+      <label class="field">
+        <span class="field-label">Length mode</span>
+        <div class="radio-group" id="length-mode">
+          <label class="radio-opt">
+            <input type="radio" name="lenmode" value="data" checked>
+            <span>
+              <span class="opt-title">Exactly fit the data</span>
+              <span class="opt-sub">Tape ends right after the last byte.</span>
+            </span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="lenmode" value="fixed">
+            <span>
+              <span class="opt-title">Fixed physical length</span>
+              <span class="opt-sub">Pad with blank (all-zero) rows, or repeat your data, to reach a set length.</span>
+            </span>
+          </label>
+        </div>
+      </label>
+
+      <label class="field" id="fixed-len-field" style="display:none">
+        <span class="field-label">Target length</span>
+        <div class="row2">
+          <input type="number" id="fixed-length" value="60" min="1" step="1">
+          <select id="fixed-length-unit">
+            <option value="cm">cm</option>
+            <option value="mm">mm</option>
+            <option value="in">in</option>
+            <option value="bytes">bytes</option>
+          </select>
+        </div>
+        <span class="field-hint" id="pad-hint">If your data is shorter, the remainder is padded with blank rows.</span>
+      </label>
+    </div>
+
+    <div class="panel">
+      <h2>03 — paper &amp; joins</h2>
+      <label class="field">
+        <span class="field-label">Sheet size</span>
+        <select id="paper-size">
+          <option value="letter">US Letter (8.5 × 11 in)</option>
+          <option value="a4">A4 (210 × 297 mm)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Sheet margin</span>
+        <input type="number" id="sheet-margin" value="12" min="5" max="25" step="1">
+        <span class="field-hint">Margin in mm on every side of each printed sheet.</span>
+      </label>
+      <label class="field" style="margin-bottom:0">
+        <span class="field-label">Join style between sheets</span>
+        <div class="radio-group" id="join-mode">
+          <label class="radio-opt">
+            <input type="radio" name="joinmode" value="overlap" checked>
+            <span>
+              <span class="opt-title">Overlap tab (recommended)</span>
+              <span class="opt-sub">Each sheet after the first repeats the last byte row as a glue tab, printed lighter. Line up the repeated row, glue, trim nothing.</span>
+            </span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="joinmode" value="butt">
+            <span>
+              <span class="opt-title">Butt join</span>
+              <span class="opt-sub">Sheets cut exactly on a byte boundary with no overlap. Tape or glue the edges flush — needs more careful alignment.</span>
+            </span>
+          </label>
+        </div>
+      </label>
+    </div>
+
+    <div class="panel">
+      <button class="primary" id="build-btn">Rebuild tape</button>
+      <button class="secondary" id="print-btn">Print / save as PDF</button>
+      <div class="stats" id="stats">
+        <div class="stat"><span class="n" id="stat-bytes">0</span><span class="l">bytes</span></div>
+        <div class="stat"><span class="n" id="stat-length">0</span><span class="l">tape length</span></div>
+        <div class="stat"><span class="n" id="stat-sheets">0</span><span class="l">sheets to print</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <section>
+    <div class="preview-toolbar">
+      <span class="title">Screen preview — scroll to see every sheet in order</span>
+      <div class="zoom-controls">
+        <button id="zoom-out" aria-label="Zoom out">−</button>
+        <button id="zoom-in" aria-label="Zoom in">+</button>
+      </div>
+    </div>
+    <div id="sheets-scroll">
+      <div id="sheets"></div>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#E8A33D"></span> tape / paper</span>
+      <span><span class="swatch" style="background:#1B1D22; border-radius:50%"></span> clock hole (always present)</span>
+      <span><span class="swatch" style="background:#fff; border:1px solid #999"></span> data hole (bit = 1)</span>
+      <span><span class="swatch" style="background:#C2452D"></span> cut / fold line — always on a byte boundary</span>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Hole spacing and the clock+data layout follow the original
+  <a href="https://arduining.com" target="_blank" rel="noopener">Arduining.com</a> punched-tape reader design —
+  one clock pulse and one data bit per row, 8 rows per byte. Print at 100% / actual size —
+  disable "fit to page" in your print dialog, or the tape will scale off-pitch.
+</footer>
+
+<div id="print-root"></div>
+
+<script src="tape.js"></script>
+</body>
+</html>
