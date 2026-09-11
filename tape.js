@@ -284,15 +284,24 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
 
   const leaderWidth = isVeryFirstLane ? BUFFER_LENGTH_MM : 0;
   const trailerWidth = isVeryLastLane ? BUFFER_LENGTH_MM : 0;
+  const n = laneRows.length;
+  const contentWidth = n * ROW_PITCH_MM;
 
-  // tape background band — extended to include the leader/trailer buffer
-  // zone where one applies to this lane
+  // The lane only needs to be as wide as what it actually contains —
+  // leader (if any) + real row content + trailer (if any) — not the full
+  // sheet-wide usableW. Drawing the background rect at usableW regardless
+  // of how many rows landed in this lane left a stretch of blank,
+  // functionally meaningless tape hanging off the end of every
+  // partially-filled lane, which is wasted paper and confusing to cut
+  // around (it isn't a leader/trailer buffer, isn't glue margin, and
+  // isn't data — just print filler).
+  const actualLaneWidth = leaderWidth + contentWidth + trailerWidth;
+
+  // tape background band — sized to exactly what this lane holds
   laneG.appendChild(svgEl("rect", {
-    x: 0, y: 0, width: usableW, height: TAPE_WIDTH_MM,
+    x: 0, y: 0, width: actualLaneWidth, height: TAPE_WIDTH_MM,
     fill: "#E8A33D", stroke: "#8a5a12", "stroke-width": 0.3
   }));
-
-  const n = laneRows.length;
 
   // Row i=0 is always the chronologically-first row (the one the reader
   // meets earliest). In a normal lane it's drawn on the left; in a
@@ -300,15 +309,14 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
   // The leader buffer must sit before row i=0 in READING order, and the
   // trailer must sit after row i=(n-1) in reading order — so both need to
   // flip sides along with the lane's own direction, not just the leader.
-  const contentWidth = n * ROW_PITCH_MM;
-
-  // In a reversed lane, reading order runs right-to-left across the page,
-  // so the buffer that comes FIRST in reading order (the leader, if this
-  // is also the very first lane) must be drawn on the page's right edge,
-  // and the buffer that comes LAST (the trailer) on the page's left edge.
-  const leaderPageX = reverse ? (usableW - leaderWidth) : 0;
+  //
+  // Positions are now anchored to actualLaneWidth (this lane's own real
+  // width), not the sheet-wide usableW, so a reversed lane's content sits
+  // flush against this lane's own right edge rather than the full sheet
+  // width regardless of how short the lane's content is.
+  const leaderPageX = reverse ? (actualLaneWidth - leaderWidth) : 0;
   const trailerPageX = reverse ? 0 : (leaderWidth + contentWidth);
-  const rowOriginOffset = reverse ? (usableW - leaderWidth - contentWidth) : leaderWidth;
+  const rowOriginOffset = reverse ? (actualLaneWidth - leaderWidth - contentWidth) : leaderWidth;
 
   if (isVeryFirstLane) {
     drawBuffer(laneG, leaderPageX, leaderWidth, reverse, "leader");
