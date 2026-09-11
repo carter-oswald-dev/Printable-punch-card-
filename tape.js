@@ -21,13 +21,20 @@
 
 // ---------- Physical constants (mm) ----------
 // Measured from the reference PDF at 300dpi (11.811 px/mm):
-//   row pitch (clock-to-clock along strip axis)    ≈ 71.6 px → 6.06 mm
 //   circle diameter (the only real hole)            ≈ 68.2 px → 5.77 mm
-//   data circle size (hand-inked, same size)   ≈ 68.2 px → 5.77 mm
+//   data circle size (hand-inked, same size)        ≈ 68.2 px → 5.77 mm
 //   clock-track inset from its edge                 ≈ 74.4 px → 6.30 mm
 //   data-track inset from its (opposite) edge       ≈ 70.9 px → 6.00 mm
+//
+// ROW_PITCH_MM is NOT the reference PDF's measured 6.06mm. That measured
+// pitch assumed clock and data sat at the same along-axis position with no
+// stagger. Once a half-hole-width stagger was added (CLOCK_LEAD_MM below)
+// so the clock and data circles are never simultaneously "active", the
+// reference pitch became too tight: adjacent rows' circles would overlap
+// and spill past the tape's own printed edges. The pitch below is widened
+// just enough to fit the full stagger with a small safety gap, so every
+// circle stays fully inside its own row slot with no collisions.
 const TAPE_WIDTH_MM     = 25.0;   // strip width, matches reference PDF
-const ROW_PITCH_MM      = 6.06;   // the tape's "clock rate" — distance between successive clock pulses
 const HOLE_DIAM_MM      = 5.77;   // clock hole diameter, and matching size for the data cell circle
 const CLOCK_INSET_MM    = 6.30;   // clock hole track distance from its edge of the strip
 const DATA_INSET_MM     = 6.00;   // data cell track distance from its (opposite) edge of the strip
@@ -44,6 +51,12 @@ const BYTE_ROWS         = 8;
 // same instant, rather than relying solely on the sketch's software
 // debounce delay for separation.
 const CLOCK_LEAD_MM     = HOLE_DIAM_MM / 2;  // ≈ 2.885 mm, clock always first
+
+// Row pitch: wide enough that row N's data circle and row N+1's clock
+// circle never touch, given the stagger above. Minimum safe value is
+// CLOCK_LEAD_MM + HOLE_DIAM_MM (≈ 8.655mm); +0.5mm adds visible daylight
+// between adjacent circles rather than leaving them just barely touching.
+const ROW_PITCH_MM      = CLOCK_LEAD_MM + HOLE_DIAM_MM + 0.5;  // ≈ 9.155 mm
 
 // Leader/trailer buffer: a plain, feature-free length of tape at the very
 // start and very end of the WHOLE tape (once each — not repeated per sheet
@@ -204,16 +217,19 @@ function renderSheetSVG(opts) {
   const numLanes = Math.max(1, Math.floor((usableH + laneGap) / laneHeight));
 
   // How many rows fit per lane, along the row pitch. The very first lane of
-  // the very first sheet reserves space for the leader buffer; figure out
-  // how many rows that costs so pagination stays accurate. Row counts are
-  // rounded DOWN to a multiple of BYTE_ROWS so a lane fold never lands
-  // mid-byte — this must match splitIntoSheets' math exactly, or the two
-  // would disagree about how many rows fit per sheet and rows would be
-  // dropped or duplicated across a sheet boundary.
+  // the very first sheet reserves space for the leader buffer, and if the
+  // WHOLE tape is short enough to also end within that same lane, it needs
+  // space for the trailer too. Row counts are rounded DOWN to a multiple
+  // of BYTE_ROWS so a lane fold never lands mid-byte — this must match
+  // splitIntoSheets' math exactly, or the two would disagree about how
+  // many rows fit per sheet and rows would be dropped or duplicated
+  // across a sheet boundary.
   const rowsPerLaneNormalRaw = Math.max(1, Math.floor(usableW / ROW_PITCH_MM));
   const rowsPerLaneNormal = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneNormalRaw / BYTE_ROWS) * BYTE_ROWS);
   const rowsPerLaneWithLeaderRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM) / ROW_PITCH_MM));
   const rowsPerLaneWithLeader = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeaderRaw / BYTE_ROWS) * BYTE_ROWS);
+  const rowsPerLaneWithBothRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM * 2) / ROW_PITCH_MM));
+  const rowsPerLaneWithBoth = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithBothRaw / BYTE_ROWS) * BYTE_ROWS);
 
   const g = svgEl("g", { transform: `translate(${marginMm}, ${marginMm})` });
   svg.appendChild(g);
@@ -223,7 +239,17 @@ function renderSheetSVG(opts) {
 
   while (rowCursor < rows.length && laneIndex < numLanes) {
     const isVeryFirstLane = isFirstSheet && laneIndex === 0;
-    const rowsPerLane = isVeryFirstLane ? rowsPerLaneWithLeader : rowsPerLaneNormal;
+
+    // If this is the very first lane AND all remaining rows would fit
+    // within the leader-reduced capacity, the trailer will ALSO land in
+    // this lane — so use the doubly-reduced capacity instead, even though
+    // that means slicing fewer rows than rowsPerLaneWithLeader would allow.
+    const remaining = rows.length - rowCursor;
+    const bothBuffersApply = isVeryFirstLane && isLastSheet && remaining <= rowsPerLaneWithLeader;
+
+    const rowsPerLane = bothBuffersApply ? rowsPerLaneWithBoth
+                       : isVeryFirstLane ? rowsPerLaneWithLeader
+                       : rowsPerLaneNormal;
     const laneRows = rows.slice(rowCursor, rowCursor + rowsPerLane);
     const reverse = laneIndex % 2 === 1;
     const laneY = laneIndex * laneHeight;
@@ -484,15 +510,24 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
   const rowsPerLaneAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLane / BYTE_ROWS) * BYTE_ROWS);
 
   // The very first lane of the very first sheet reserves space for the
-  // leader buffer, so it holds fewer rows than a normal lane. This must
-  // match renderSheetSVG's rowsPerLaneWithLeader exactly, or the two would
+  // leader buffer, so it holds fewer rows than a normal lane. If the WHOLE
+  // tape is short enough to end within that same lane, the trailer lands
+  // there too and it needs the doubly-reduced capacity instead. Both must
+  // match renderSheetSVG's equivalent values exactly, or the two would
   // disagree about how many rows fit on sheet 1 and rows would go missing
   // or overlap between sheets.
   const rowsPerLaneWithLeader = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM) / ROW_PITCH_MM));
   const rowsPerLaneWithLeaderAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeader / BYTE_ROWS) * BYTE_ROWS);
+  const rowsPerLaneWithBoth = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM * 2) / ROW_PITCH_MM));
+  const rowsPerLaneWithBothAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithBoth / BYTE_ROWS) * BYTE_ROWS);
 
   const rowsPerSheet = rowsPerLaneAligned * numLanes;
-  const rowsPerFirstSheet = rowsPerLaneWithLeaderAligned + rowsPerLaneAligned * (numLanes - 1);
+  // First-sheet capacity assuming the tape continues past this sheet
+  // (leader only affects lane 0; every other lane is normal capacity)
+  const rowsPerFirstSheetContinuing = rowsPerLaneWithLeaderAligned + rowsPerLaneAligned * (numLanes - 1);
+  // First-sheet capacity assuming the WHOLE tape fits in this one sheet
+  // (both leader and trailer could land in lane 0, if everything fits there)
+  const rowsPerFirstSheetIfAlsoLast = rowsPerLaneWithBothAligned + rowsPerLaneAligned * (numLanes - 1);
 
   const sheets = [];
   let cursor = 0;
@@ -502,7 +537,15 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
     let sheetRows;
     let freshCount;
     const isVeryFirstSheet = sheets.length === 0;
-    const capacityForThisSheet = isVeryFirstSheet ? rowsPerFirstSheet : rowsPerSheet;
+
+    // For the very first sheet, we don't yet know if it's also the last
+    // sheet until we see how much fits. If the ENTIRE remaining tape is
+    // short enough to fit within the "both buffers in lane 0" capacity,
+    // treat this as a first-and-last sheet; otherwise use the
+    // leader-only capacity and let the tape continue onto more sheets.
+    const capacityForThisSheet = isVeryFirstSheet
+      ? (rows.length - cursor <= rowsPerFirstSheetIfAlsoLast ? rowsPerFirstSheetIfAlsoLast : rowsPerFirstSheetContinuing)
+      : rowsPerSheet;
 
     if (isVeryFirstSheet) {
       sheetRows = rows.slice(cursor, cursor + capacityForThisSheet);

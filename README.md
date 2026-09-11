@@ -52,23 +52,44 @@ No build step, no dependencies, no external JS — just two files.
 
 ## Geometry reference
 
-Measured directly from a 300dpi render of the original Arduining
-"Punched Tape" PDF (not estimated):
+Base dimensions measured directly from a 300dpi render of the original
+Arduining "Punched Tape" PDF; row pitch and stagger are deliberate
+departures from that reference, explained below.
 
-- Tape width: 25 mm
-- Row pitch (clock-to-clock along the strip): **6.06 mm** — this is the
-  tape's real "clock rate": each row is one clock pulse in the reader
-  sketch, so this pitch is what "how fast you pull the tape" becomes
-  electrically
-- Clock hole diameter: 5.77 mm (same size used for the data cell circle)
-- Clock hole track: 6.30 mm in from its edge of the strip
-- Data cell track: 6.00 mm in from the *opposite* edge of the strip
+- Tape width: 25 mm (measured)
+- Clock/data circle diameter: 5.77 mm (measured)
+- Clock hole track: 6.30 mm in from its edge of the strip (measured)
+- Data cell track: 6.00 mm in from the *opposite* edge of the strip (measured)
 - 8 rows per byte, with a marked fold/cut point between bytes
 
-The clock hole and its same-row data cell sit on opposite edges of the
-strip at (almost exactly) the same position along the tape's length —
-not offset diagonally within a row.
+**Row pitch and the clock/data stagger are a deliberate design change,
+not the reference measurement.** The reference PDF's rows measure 6.06 mm
+apart with clock and data at the same along-tape position. This tool
+instead staggers each row's data circle half a hole-width *behind* its
+clock circle — clock always reaches the reader first — so the two
+contacts are never both sitting over an active feature at the same
+instant. Fitting that stagger without adjacent rows' circles overlapping
+requires a wider row pitch:
 
-- Feed buffer: 30 mm of blank tape at each end of the whole tape (not
-  repeated per sheet), a deliberate design addition rather than something
-  measured from the reference PDF.
+- Row pitch: **9.155 mm** (`clock lead + hole diameter + 0.5mm safety
+  gap`, not the reference's 6.06 mm)
+- Clock/data stagger: 2.885 mm (half the hole diameter)
+
+This makes each byte of tape roughly 50% longer than the original
+reference design, in exchange for guaranteeing physical separation
+between the two contacts on every row.
+
+## Feed buffer
+
+A 30 mm stretch of blank tape — no clock holes, no data cells — runs
+once at the very start and once at the very end of the whole tape (not
+repeated per sheet or per lane), so a feed mechanism always has solid
+tape to grip before the first real row and after the last one. Each
+buffer is labeled CLOCK / DATA with a feed-direction arrow. This is a
+deliberate design addition, not part of the reference PDF.
+
+If a tape is short enough that both the leader and trailer would land in
+the same lane, the tool automatically reduces how many data rows go in
+that lane so the two buffers and the real data all fit without
+overlapping — you may see a short message wrap onto a second lane earlier
+than expected as a result.
