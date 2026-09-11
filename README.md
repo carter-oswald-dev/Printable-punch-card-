@@ -13,9 +13,9 @@ Only the **circle** is a real hole. It's the clock/sprocket track that
 physically drives the reader, and it's punched on every single row no
 matter what the data bit is.
 
-The **square** next to it is not a hole — it's a blank cell you fill in
+The **second circle** next to it is not a hole — it's a blank cell you fill in
 by hand with a pen. Ink it solid for a `1`; leave it blank for a `0`.
-This tool prints the squares already filled in or left blank according to
+This tool prints the data circles already filled in or left blank according to
 your data, so — depending on your reader's sensing method — you may be
 able to use the sheet straight off the printer with no inking step at all.
 
@@ -55,7 +55,7 @@ Measured directly from a 300dpi render of the original Arduining
   tape's real "clock rate": each row is one clock pulse in the reader
   sketch, so this pitch is what "how fast you pull the tape" becomes
   electrically
-- Clock hole diameter: 5.77 mm (same size used for the data cell square)
+- Clock hole diameter: 5.77 mm (same size used for the data cell circle)
 - Clock hole track: 6.30 mm in from its edge of the strip
 - Data cell track: 6.00 mm in from the *opposite* edge of the strip
 - 8 rows per byte, with a marked fold/cut point between bytes

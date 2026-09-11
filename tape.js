@@ -5,7 +5,7 @@
 
    Only the CIRCLE is a real physical hole: it's the clock/sprocket
    track that drives the reader, and it's punched on every single
-   row regardless of data value. The SQUARE next to it is not a
+   row regardless of data value. The second CIRCLE next to it is not a
    hole at all — it's a blank cell a human fills in by hand with
    ink to write the data bit (filled in = 1, left blank = 0). The
    reader's photodiode/switch on the data pin reads "ink present"
@@ -23,17 +23,27 @@
 // Measured from the reference PDF at 300dpi (11.811 px/mm):
 //   row pitch (clock-to-clock along strip axis)    ≈ 71.6 px → 6.06 mm
 //   circle diameter (the only real hole)            ≈ 68.2 px → 5.77 mm
-//   square size (hand-inked data cell, same size)   ≈ 68.2 px → 5.77 mm
+//   data circle size (hand-inked, same size)   ≈ 68.2 px → 5.77 mm
 //   clock-track inset from its edge                 ≈ 74.4 px → 6.30 mm
 //   data-track inset from its (opposite) edge       ≈ 70.9 px → 6.00 mm
-//   along-axis stagger, clock vs its same-row data  ≈  4.9 px → 0.41 mm (negligible — treated as 0)
 const TAPE_WIDTH_MM     = 25.0;   // strip width, matches reference PDF
 const ROW_PITCH_MM      = 6.06;   // the tape's "clock rate" — distance between successive clock pulses
-const HOLE_DIAM_MM      = 5.77;   // clock hole diameter, and matching size for the data cell square
+const HOLE_DIAM_MM      = 5.77;   // clock hole diameter, and matching size for the data cell circle
 const CLOCK_INSET_MM    = 6.30;   // clock hole track distance from its edge of the strip
 const DATA_INSET_MM     = 6.00;   // data cell track distance from its (opposite) edge of the strip
 const DIAGONAL_DEG      = 42;     // visual diagonal angle of the strip, matches reference art
 const BYTE_ROWS         = 8;
+
+// Along-axis stagger between the clock hole and its same-row data cell.
+// Chosen (not measured from the reference — a deliberate design choice) as
+// half a hole width, with the clock hole always leading: as the tape feeds
+// through the reader, the clock contact reaches each row's clock hole
+// first, and only half a hole-diameter later does the data contact reach
+// that row's data cell. This keeps the two contacts from ever being over
+// their respective row features — and therefore both "active" — at the
+// same instant, rather than relying solely on the sketch's software
+// debounce delay for separation.
+const CLOCK_LEAD_MM     = HOLE_DIAM_MM / 2;  // ≈ 2.885 mm, clock always first
 
 // ---------- Paper sizes (mm) ----------
 const PAPER = {
@@ -249,31 +259,41 @@ function drawRow(laneG, x, rowData, isOverlapRow, joinMode) {
 
   // The circle is the ONLY real hole in the paper — the clock/sprocket
   // track that physically drives the reader, punched on every single row
-  // regardless of data value. The square is not a hole at all: it's a
+  // regardless of data value. This second circle is not a hole at all: it's a
   // blank cell a human fills in by hand with ink to write a data bit.
   // Filled in (solid) = 1. Left blank = 0.
+  //
+  // The clock hole is staggered half a hole-width ahead of its row's data
+  // cell, along the direction the tape feeds through the reader (increasing
+  // x = further along, fed later). This guarantees the clock contact always
+  // reaches a row before the data contact does, and the two are never both
+  // sitting over an active feature at the same instant.
+  const clockX = x - CLOCK_LEAD_MM / 2;
+  const dataX  = x + CLOCK_LEAD_MM / 2;
   const clockY = CLOCK_INSET_MM;
   const dataY = TAPE_WIDTH_MM - DATA_INSET_MM;
   const r = HOLE_DIAM_MM / 2;
 
-  // clock hole: always punched, every row, no matter the data value
+  // clock hole: always punched, every row, no matter the data value —
+  // always the leading (first-reached) feature of the pair
   rowG.appendChild(svgEl("circle", {
-    cx: x, cy: clockY, r: r,
+    cx: clockX, cy: clockY, r: r,
     fill: "#1B1D22"
   }));
 
-  // data cell: a square outline to write in by hand, not a hole
+  // data cell: a circle to write in by hand, not a hole —
+  // always trailing the clock hole by half a hole-width
   if (rowData.bit === 1) {
     // pre-filled to show a "1" — printed solid, as if already inked
-    rowG.appendChild(svgEl("rect", {
-      x: x - r, y: dataY - r, width: r * 2, height: r * 2,
+    rowG.appendChild(svgEl("circle", {
+      cx: dataX, cy: dataY, r: r,
       fill: "#1B1D22", stroke: "#1B1D22", "stroke-width": 0.25
     }));
   } else {
     // blank cell for a "0" — just the outline, left empty for the tape
     // to read as 0 (or for a human to leave un-inked)
-    rowG.appendChild(svgEl("rect", {
-      x: x - r, y: dataY - r, width: r * 2, height: r * 2,
+    rowG.appendChild(svgEl("circle", {
+      cx: dataX, cy: dataY, r: r,
       fill: "none", stroke: "#8a5a12", "stroke-width": 0.35
     }));
   }
