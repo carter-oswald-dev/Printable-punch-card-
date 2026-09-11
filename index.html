@@ -464,6 +464,7 @@
       <span><span class="swatch" style="background:#1B1D22; border-radius:50%"></span> data cell filled in — bit = 1</span>
       <span><span class="swatch" style="background:#fff; border:1px solid #999; border-radius:50%"></span> data cell left blank — bit = 0</span>
       <span><span class="swatch" style="background:#C2452D"></span> cut / fold line — always on a byte boundary</span>
+      <span><span class="swatch" style="background:#E8A33D; border:1px dashed #8a5a12"></span> feed leader / trailer — blank, no holes, labeled CLOCK/DATA</span>
     </div>
   </section>
 </main>
@@ -473,7 +474,10 @@
   track that drives the reader and is punched on every row, whether the
   data bit is 0 or 1. The second circle next to it isn't a hole: it's a cell a
   human fills in with ink to write the data bit — solid = 1, blank = 0.
-  Layout follows the original
+  A blank 30mm feed buffer runs before the first row and after the last row
+  of the whole tape — nothing to catch on a reader mechanism — labeled
+  CLOCK and DATA with a feed-direction arrow so the strip only goes in one
+  way. Layout follows the original
   <a href="https://arduining.com" target="_blank" rel="noopener">Arduining.com</a> punched-tape reader design —
   one clock pulse and one data bit per row, 8 rows per byte. Print at 100% / actual size —
   disable "fit to page" in your print dialog, or the tape will scale off-pitch.

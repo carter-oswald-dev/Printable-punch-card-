@@ -45,6 +45,16 @@ const BYTE_ROWS         = 8;
 // debounce delay for separation.
 const CLOCK_LEAD_MM     = HOLE_DIAM_MM / 2;  // ≈ 2.885 mm, clock always first
 
+// Leader/trailer buffer: a plain, feature-free length of tape at the very
+// start and very end of the WHOLE tape (once each — not repeated per sheet
+// or per lane). This gives a feed mechanism, roller, or fingers something
+// solid to grip before the first real clock pulse and after the last one,
+// so the reader's contacts never ride onto — or off of — the strip
+// mid-hole. Drawn as solid tape with no holes, labeled once with which
+// track is clock and which is data so the strip can't be fed in backwards.
+const BUFFER_LENGTH_MM     = 30;   // plain feed length at each end of the tape
+const BUFFER_LABEL_SIZE_MM = 2.6;  // font size for the CLOCK/DATA buffer labels
+
 // ---------- Paper sizes (mm) ----------
 const PAPER = {
   letter: { w: 215.9, h: 279.4, name: "US Letter" },
@@ -193,8 +203,17 @@ function renderSheetSVG(opts) {
   const laneHeight = TAPE_WIDTH_MM + laneGap;
   const numLanes = Math.max(1, Math.floor((usableH + laneGap) / laneHeight));
 
-  // How many rows fit per lane, along the row pitch
-  const rowsPerLane = Math.max(1, Math.floor(usableW / ROW_PITCH_MM));
+  // How many rows fit per lane, along the row pitch. The very first lane of
+  // the very first sheet reserves space for the leader buffer; figure out
+  // how many rows that costs so pagination stays accurate. Row counts are
+  // rounded DOWN to a multiple of BYTE_ROWS so a lane fold never lands
+  // mid-byte — this must match splitIntoSheets' math exactly, or the two
+  // would disagree about how many rows fit per sheet and rows would be
+  // dropped or duplicated across a sheet boundary.
+  const rowsPerLaneNormalRaw = Math.max(1, Math.floor(usableW / ROW_PITCH_MM));
+  const rowsPerLaneNormal = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneNormalRaw / BYTE_ROWS) * BYTE_ROWS);
+  const rowsPerLaneWithLeaderRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM) / ROW_PITCH_MM));
+  const rowsPerLaneWithLeader = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeaderRaw / BYTE_ROWS) * BYTE_ROWS);
 
   const g = svgEl("g", { transform: `translate(${marginMm}, ${marginMm})` });
   svg.appendChild(g);
@@ -203,11 +222,19 @@ function renderSheetSVG(opts) {
   let laneIndex = 0;
 
   while (rowCursor < rows.length && laneIndex < numLanes) {
+    const isVeryFirstLane = isFirstSheet && laneIndex === 0;
+    const rowsPerLane = isVeryFirstLane ? rowsPerLaneWithLeader : rowsPerLaneNormal;
     const laneRows = rows.slice(rowCursor, rowCursor + rowsPerLane);
     const reverse = laneIndex % 2 === 1;
     const laneY = laneIndex * laneHeight;
 
-    drawLane(g, laneRows, laneY, usableW, reverse, rowCursor, joinMode, leadOverlapRows, isFirstSheet);
+    // this lane is the very last one drawn for the WHOLE tape if it's on
+    // the last sheet and either fills the last lane slot or simply
+    // consumes the remaining rows
+    const isVeryLastLane = isLastSheet && (rowCursor + laneRows.length >= rows.length);
+
+    drawLane(g, laneRows, laneY, usableW, reverse, rowCursor, joinMode, leadOverlapRows,
+             isFirstSheet, isVeryFirstLane, isVeryLastLane);
 
     rowCursor += laneRows.length;
     laneIndex++;
@@ -224,21 +251,50 @@ function renderSheetSVG(opts) {
   return svg;
 }
 
-function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode, leadOverlapRows, isFirstSheet) {
+function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode, leadOverlapRows,
+                   isFirstSheet, isVeryFirstLane, isVeryLastLane) {
   const laneG = svgEl("g", { transform: `translate(0, ${laneY})` });
   g.appendChild(laneG);
 
-  // tape background band
+  const leaderWidth = isVeryFirstLane ? BUFFER_LENGTH_MM : 0;
+  const trailerWidth = isVeryLastLane ? BUFFER_LENGTH_MM : 0;
+
+  // tape background band — extended to include the leader/trailer buffer
+  // zone where one applies to this lane
   laneG.appendChild(svgEl("rect", {
     x: 0, y: 0, width: usableW, height: TAPE_WIDTH_MM,
     fill: "#E8A33D", stroke: "#8a5a12", "stroke-width": 0.3
   }));
 
   const n = laneRows.length;
+
+  // Row i=0 is always the chronologically-first row (the one the reader
+  // meets earliest). In a normal lane it's drawn on the left; in a
+  // reversed (serpentine fold-back) lane it's drawn on the right instead.
+  // The leader buffer must sit before row i=0 in READING order, and the
+  // trailer must sit after row i=(n-1) in reading order — so both need to
+  // flip sides along with the lane's own direction, not just the leader.
+  const contentWidth = n * ROW_PITCH_MM;
+
+  // In a reversed lane, reading order runs right-to-left across the page,
+  // so the buffer that comes FIRST in reading order (the leader, if this
+  // is also the very first lane) must be drawn on the page's right edge,
+  // and the buffer that comes LAST (the trailer) on the page's left edge.
+  const leaderPageX = reverse ? (usableW - leaderWidth) : 0;
+  const trailerPageX = reverse ? 0 : (leaderWidth + contentWidth);
+  const rowOriginOffset = reverse ? (usableW - leaderWidth - contentWidth) : leaderWidth;
+
+  if (isVeryFirstLane) {
+    drawBuffer(laneG, leaderPageX, leaderWidth, reverse, "leader");
+  }
+
   for (let i = 0; i < n; i++) {
     const rowData = laneRows[i];
+    // visualIndex counts rows in PAGE-DRAWING order (left to right); when
+    // reverse, row i=0 (chronologically first) lands at the rightmost
+    // content slot, i.e. the highest visualIndex
     const visualIndex = reverse ? (n - 1 - i) : i;
-    const x = visualIndex * ROW_PITCH_MM + ROW_PITCH_MM / 2;
+    const x = rowOriginOffset + visualIndex * ROW_PITCH_MM + ROW_PITCH_MM / 2;
 
     const isOverlapRow = (isFirstSheet === false) && (globalRowStart + i) < leadOverlapRows;
 
@@ -250,6 +306,76 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
       drawCutMark(laneG, cutX, joinMode, rowData.isJoinCut);
     }
   }
+
+  if (isVeryLastLane) {
+    drawBuffer(laneG, trailerPageX, trailerWidth, reverse, "trailer");
+  }
+}
+
+// Draws a plain, feature-free stretch of tape (no clock hole, no data
+// circle) used as a leader (before the first real row) or trailer (after
+// the last real row) so a feed mechanism always grips solid tape, never a
+// hole. Also stamps the CLOCK/DATA track labels once, so the strip can't
+// be fed in backwards or upside down.
+function drawBuffer(laneG, startX, widthMm, reverse, kind) {
+  if (widthMm <= 0) return;
+
+  const bufG = svgEl("g", {});
+  laneG.appendChild(bufG);
+
+  // subtle inner line marking where the buffer ends and real data begins,
+  // so it reads clearly as "feed zone" rather than looking like a mistake
+  const dividerX = kind === "leader" ? startX + widthMm : startX;
+  bufG.appendChild(svgEl("line", {
+    x1: dividerX, y1: 0, x2: dividerX, y2: TAPE_WIDTH_MM,
+    stroke: "#8a5a12", "stroke-width": 0.25, "stroke-dasharray": "1,1"
+  }));
+
+  const clockY = CLOCK_INSET_MM;
+  const dataY = TAPE_WIDTH_MM - DATA_INSET_MM;
+
+  // Label placement: text runs along the tape, positioned so it reads
+  // correctly regardless of which lane direction this buffer landed in.
+  const textX = startX + widthMm / 2;
+  const anchor = "middle";
+
+  const clockLabel = svgEl("text", {
+    x: textX, y: clockY + BUFFER_LABEL_SIZE_MM * 0.32,
+    "font-size": BUFFER_LABEL_SIZE_MM, "font-family": "monospace",
+    "font-weight": "bold", fill: "#1B1D22", "text-anchor": anchor
+  });
+  clockLabel.textContent = "CLOCK";
+  bufG.appendChild(clockLabel);
+
+  const dataLabel = svgEl("text", {
+    x: textX, y: dataY + BUFFER_LABEL_SIZE_MM * 0.32,
+    "font-size": BUFFER_LABEL_SIZE_MM, "font-family": "monospace",
+    "font-weight": "bold", fill: "#1B1D22", "text-anchor": anchor
+  });
+  dataLabel.textContent = "DATA";
+  bufG.appendChild(dataLabel);
+
+  // small arrow indicating feed direction (into the reader), pointing from
+  // the buffer toward the real holes
+  const arrowDir = kind === "leader" ? 1 : -1;
+  const arrowBaseX = kind === "leader" ? startX + widthMm * 0.78 : startX + widthMm * 0.22;
+  const arrowY = TAPE_WIDTH_MM / 2;
+  const arrowLen = 3.2;
+  bufG.appendChild(svgEl("line", {
+    x1: arrowBaseX, y1: arrowY, x2: arrowBaseX + arrowLen * arrowDir, y2: arrowY,
+    stroke: "#1B1D22", "stroke-width": 0.4
+  }));
+  bufG.appendChild(svgEl("polygon", {
+    points: `${arrowBaseX + arrowLen*arrowDir},${arrowY} ${arrowBaseX + (arrowLen-1.1)*arrowDir},${arrowY-0.9} ${arrowBaseX + (arrowLen-1.1)*arrowDir},${arrowY+0.9}`,
+    fill: "#1B1D22"
+  }));
+
+  const kindLabel = svgEl("text", {
+    x: textX, y: TAPE_WIDTH_MM + 3.6,
+    "font-size": 2.1, "font-family": "monospace", fill: "#8a8578", "text-anchor": anchor
+  });
+  kindLabel.textContent = kind === "leader" ? "feed leader — no data" : "feed trailer — no data";
+  bufG.appendChild(kindLabel);
 }
 
 function drawRow(laneG, x, rowData, isOverlapRow, joinMode) {
@@ -356,7 +482,17 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
   // rows per lane must be a multiple of BYTE_ROWS so lanes themselves don't
   // split a byte across the serpentine fold
   const rowsPerLaneAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLane / BYTE_ROWS) * BYTE_ROWS);
+
+  // The very first lane of the very first sheet reserves space for the
+  // leader buffer, so it holds fewer rows than a normal lane. This must
+  // match renderSheetSVG's rowsPerLaneWithLeader exactly, or the two would
+  // disagree about how many rows fit on sheet 1 and rows would go missing
+  // or overlap between sheets.
+  const rowsPerLaneWithLeader = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM) / ROW_PITCH_MM));
+  const rowsPerLaneWithLeaderAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeader / BYTE_ROWS) * BYTE_ROWS);
+
   const rowsPerSheet = rowsPerLaneAligned * numLanes;
+  const rowsPerFirstSheet = rowsPerLaneWithLeaderAligned + rowsPerLaneAligned * (numLanes - 1);
 
   const sheets = [];
   let cursor = 0;
@@ -365,15 +501,17 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
   while (cursor < rows.length) {
     let sheetRows;
     let freshCount;
+    const isVeryFirstSheet = sheets.length === 0;
+    const capacityForThisSheet = isVeryFirstSheet ? rowsPerFirstSheet : rowsPerSheet;
 
-    if (sheets.length === 0) {
-      sheetRows = rows.slice(cursor, cursor + rowsPerSheet);
+    if (isVeryFirstSheet) {
+      sheetRows = rows.slice(cursor, cursor + capacityForThisSheet);
       freshCount = sheetRows.length;
     } else {
       // repeat the overlap tail from the previous sheet's *source* position,
       // i.e. re-take the last BYTE_ROWS rows already consumed
       const overlapSource = rows.slice(Math.max(0, cursor - overlapRows), cursor);
-      freshCount = Math.max(0, rowsPerSheet - overlapSource.length);
+      freshCount = Math.max(0, capacityForThisSheet - overlapSource.length);
       const fresh = rows.slice(cursor, cursor + freshCount);
       sheetRows = overlapSource.concat(fresh);
       freshCount = fresh.length;

@@ -34,6 +34,11 @@ able to use the sheet straight off the printer with no inking step at all.
     twin and there's no gap and no double-counted byte.
   - **Butt join** — sheets cut exactly on a byte edge with no repeated
     content, for taping/gluing edge-to-edge.
+- A blank 30 mm feed buffer at the very start and very end of the whole
+  tape — no clock holes, no data cells — so a feed mechanism, roller, or
+  your fingers always have plain tape to grip before the first real clock
+  pulse and after the last one. Each buffer is labeled CLOCK / DATA with a
+  feed-direction arrow, so the strip can only go into the reader one way.
 - Print view uses real millimeter sizing via SVG `viewBox`, so **print at
   100% / actual size** (disable "fit to page") to keep the hole pitch
   physically exact.
@@ -63,3 +68,7 @@ Measured directly from a 300dpi render of the original Arduining
 The clock hole and its same-row data cell sit on opposite edges of the
 strip at (almost exactly) the same position along the tape's length —
 not offset diagonally within a row.
+
+- Feed buffer: 30 mm of blank tape at each end of the whole tape (not
+  repeated per sheet), a deliberate design addition rather than something
+  measured from the reference PDF.
