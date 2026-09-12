@@ -98,9 +98,18 @@ than expected as a result.
 
 Every fold within a sheet — the point where one printed row of tape ends
 and the next one (below it, on the same sheet) begins — gets a blank
-stretch of tape reserved at its end, marked "glue." This is the material
-you actually cut to and glue the next lane's start onto once the sheet
-is cut apart into strips and reassembled into one continuous tape.
+stretch of tape reserved at both sides of the fold:
+
+- a **glue zone** at the end of the earlier lane, marked "glue"
+- a matching **receiving zone** at the start of the next lane, also marked
+  "glue"
+
+When you cut the sheet apart at a fold, both halves of that cut carry a
+blank zone of the same length — cut, then glue or tape the two blank ends
+together, and the hole/cell pitch continues seamlessly across the join.
+Without the receiving zone, the previous strip's glued overlap would land
+on top of the next strip's real clock/data content instead of on blank
+tape meant to receive it.
 
 This is separate from the feed buffer above (which only appears once, at
 the true start/end of the whole tape) and separate from the sheet-to-sheet
@@ -109,6 +118,7 @@ within the same page).
 
 Adjustable in the UI ("Lane glue zone," default 15 mm) — set it to
 whatever amount of overlap is comfortable for your glue or tape and how
-precisely you can align two cut edges by hand. The very last lane of the
-whole tape never gets a glue zone (it gets the feed trailer instead, or
-nothing, since there's no next lane to join to).
+precisely you can align two cut edges by hand. The very first lane of the
+whole tape has a feed leader instead of a receiving zone (nothing comes
+before it), and the very last lane has a feed trailer instead of a glue
+zone (nothing comes after it) — every lane in between carries both.

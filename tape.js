@@ -194,6 +194,87 @@ function svgEl(tag, attrs) {
 // tape fits on a normal sheet: each "swing" covers a fixed number of rows,
 // then folds back, with a SAVE fold+cut mark at each byte boundary swing end.
 
+// ================= Shared lane-planning logic =================
+// Used by BOTH renderSheetSVG (to actually draw lanes) and splitIntoSheets
+// (to know how many rows fit on a sheet before it draws anything). Having
+// one function compute lane capacities and plan lane boundaries guarantees
+// the two can never disagree about how many rows fit where — a previous
+// version had each recompute this independently, which is exactly the kind
+// of duplication that let subtle mismatches slip in.
+
+function laneCapacities(usableW) {
+  const rowsPerLaneFirstOnlyRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM - LANE_GLUE_MM) / ROW_PITCH_MM));
+  const rowsPerLaneFirstOnly = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneFirstOnlyRaw / BYTE_ROWS) * BYTE_ROWS);
+  const rowsPerLaneMiddleRaw = Math.max(1, Math.floor((usableW - LANE_GLUE_MM * 2) / ROW_PITCH_MM));
+  const rowsPerLaneMiddle = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneMiddleRaw / BYTE_ROWS) * BYTE_ROWS);
+  const rowsPerLaneLastOnlyRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM - LANE_GLUE_MM) / ROW_PITCH_MM));
+  const rowsPerLaneLastOnly = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneLastOnlyRaw / BYTE_ROWS) * BYTE_ROWS);
+  const rowsPerLaneWithBothRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM * 2) / ROW_PITCH_MM));
+  const rowsPerLaneWithBoth = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithBothRaw / BYTE_ROWS) * BYTE_ROWS);
+  return { rowsPerLaneFirstOnly, rowsPerLaneMiddle, rowsPerLaneLastOnly, rowsPerLaneWithBoth };
+}
+
+// Plans how a sheet's row array divides into lanes, given the sheet's
+// geometry and whether this is the first/last sheet of the whole tape.
+// Returns an array of { rowCount, isVeryFirstLane, isVeryLastLane,
+// needsGlueZone } describing each lane in drawing order, WITHOUT actually
+// slicing the row array — callers slice using rowCount themselves.
+//
+// Lane capacity depends on which blank zones a lane needs to reserve
+// space for:
+//   - lane 0 (very first, not also last): [leader][content][glue]
+//   - a middle lane (not first, not last): [receiving][content][glue]
+//   - the very last lane (not also first): [receiving][content][trailer]
+//   - both-buffers lane (first AND last, tiny tape): [leader][content][trailer]
+// The "receiving" zone matches the previous lane's trailing glue zone —
+// without it, the previous strip's glued overlap would land on top of
+// this lane's real content instead of on blank tape meant to receive it.
+// Row counts are rounded DOWN to a multiple of BYTE_ROWS so a lane fold
+// never lands mid-byte.
+function planLanes(totalRowsAvailable, usableW, usableH, isFirstSheet, isLastSheet) {
+  const laneGap = 6;
+  const laneHeight = TAPE_WIDTH_MM + laneGap;
+  const numLanes = Math.max(1, Math.floor((usableH + laneGap) / laneHeight));
+  const cap = laneCapacities(usableW);
+
+  const lanes = [];
+  let rowCursor = 0;
+  let laneIndex = 0;
+
+  while (rowCursor < totalRowsAvailable && laneIndex < numLanes) {
+    const isVeryFirstLane = isFirstSheet && laneIndex === 0;
+    const remaining = totalRowsAvailable - rowCursor;
+
+    // If this is the very first lane AND all remaining rows would fit
+    // within the leader-reduced capacity, the trailer will ALSO land in
+    // this lane — so use the doubly-reduced capacity instead.
+    const bothBuffersApply = isVeryFirstLane && isLastSheet && remaining <= cap.rowsPerLaneFirstOnly;
+
+    // For a non-first lane, we don't yet know if it's also the very last
+    // lane until we check how much remains: if the remaining rows fit
+    // within the "last lane" capacity (receiving zone + content + trailer,
+    // no trailing glue needed), this IS the last lane. Otherwise it's a
+    // middle lane needing both a receiving zone AND its own trailing glue
+    // zone, so use the smaller middle-lane capacity.
+    const isLastLaneCandidate = !isVeryFirstLane && isLastSheet && remaining <= cap.rowsPerLaneLastOnly;
+
+    const rowsPerLane = bothBuffersApply ? cap.rowsPerLaneWithBoth
+                       : isVeryFirstLane ? cap.rowsPerLaneFirstOnly
+                       : isLastLaneCandidate ? cap.rowsPerLaneLastOnly
+                       : cap.rowsPerLaneMiddle;
+    const rowCount = Math.min(rowsPerLane, remaining);
+    const isVeryLastLane = isLastSheet && (rowCursor + rowCount >= totalRowsAvailable);
+    const needsGlueZone = !isVeryLastLane;
+
+    lanes.push({ rowCount, isVeryFirstLane, isVeryLastLane, needsGlueZone });
+
+    rowCursor += rowCount;
+    laneIndex++;
+  }
+
+  return { lanes, numLanes };
+}
+
 function renderSheetSVG(opts) {
   const {
     sheetWmm, sheetHmm, marginMm,
@@ -224,65 +305,24 @@ function renderSheetSVG(opts) {
   // by TAPE_WIDTH_MM + gap, reverses direction, repeats.
   const laneGap = 6; // mm between serpentine lanes
   const laneHeight = TAPE_WIDTH_MM + laneGap;
-  const numLanes = Math.max(1, Math.floor((usableH + laneGap) / laneHeight));
 
-  // How many rows fit per lane, along the row pitch. Every lane EXCEPT the
-  // very last lane of the whole tape reserves LANE_GLUE_MM at its end —
-  // that's the blank tape you'll actually glue the next lane's start onto
-  // once the sheet is cut apart at each fold. The very first lane of the
-  // very first sheet ALSO reserves space for the leader buffer at its
-  // start, and if the WHOLE tape is short enough to end within that same
-  // lane, it needs the trailer instead of a glue zone at its end. Row
-  // counts are rounded DOWN to a multiple of BYTE_ROWS so a lane fold
-  // never lands mid-byte — this must match splitIntoSheets' math exactly,
-  // or the two would disagree about how many rows fit per sheet and rows
-  // would be dropped or duplicated across a sheet boundary.
-  const rowsPerLaneNormalRaw = Math.max(1, Math.floor((usableW - LANE_GLUE_MM) / ROW_PITCH_MM));
-  const rowsPerLaneNormal = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneNormalRaw / BYTE_ROWS) * BYTE_ROWS);
-  const rowsPerLaneWithLeaderRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM - LANE_GLUE_MM) / ROW_PITCH_MM));
-  const rowsPerLaneWithLeader = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeaderRaw / BYTE_ROWS) * BYTE_ROWS);
-  const rowsPerLaneWithBothRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM * 2) / ROW_PITCH_MM));
-  const rowsPerLaneWithBoth = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithBothRaw / BYTE_ROWS) * BYTE_ROWS);
+  const { lanes } = planLanes(rows.length, usableW, usableH, isFirstSheet, isLastSheet);
 
   const g = svgEl("g", { transform: `translate(${marginMm}, ${marginMm})` });
   svg.appendChild(g);
 
   let rowCursor = 0;
-  let laneIndex = 0;
 
-  while (rowCursor < rows.length && laneIndex < numLanes) {
-    const isVeryFirstLane = isFirstSheet && laneIndex === 0;
-
-    // If this is the very first lane AND all remaining rows would fit
-    // within the leader-reduced capacity, the trailer will ALSO land in
-    // this lane — so use the doubly-reduced capacity instead, even though
-    // that means slicing fewer rows than rowsPerLaneWithLeader would allow.
-    const remaining = rows.length - rowCursor;
-    const bothBuffersApply = isVeryFirstLane && isLastSheet && remaining <= rowsPerLaneWithLeader;
-
-    const rowsPerLane = bothBuffersApply ? rowsPerLaneWithBoth
-                       : isVeryFirstLane ? rowsPerLaneWithLeader
-                       : rowsPerLaneNormal;
-    const laneRows = rows.slice(rowCursor, rowCursor + rowsPerLane);
+  lanes.forEach((lanePlan, laneIndex) => {
+    const laneRows = rows.slice(rowCursor, rowCursor + lanePlan.rowCount);
     const reverse = laneIndex % 2 === 1;
     const laneY = laneIndex * laneHeight;
 
-    // this lane is the very last one drawn for the WHOLE tape if it's on
-    // the last sheet and either fills the last lane slot or simply
-    // consumes the remaining rows
-    const isVeryLastLane = isLastSheet && (rowCursor + laneRows.length >= rows.length);
-
-    // A glue zone is added after this lane's content UNLESS it's the very
-    // last lane of the whole tape (which gets a trailer instead, or
-    // nothing, not a glue zone — there's no "next lane" to join to).
-    const needsGlueZone = !isVeryLastLane;
-
     drawLane(g, laneRows, laneY, usableW, reverse, rowCursor, joinMode, leadOverlapRows,
-             isFirstSheet, isVeryFirstLane, isVeryLastLane, needsGlueZone);
+             isFirstSheet, lanePlan.isVeryFirstLane, lanePlan.isVeryLastLane, lanePlan.needsGlueZone);
 
     rowCursor += laneRows.length;
-    laneIndex++;
-  }
+  });
 
   // sheet footer label
   const label = svgEl("text", {
@@ -308,18 +348,23 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
   // lane of the whole tape gets a trailer (or nothing) instead, since
   // there's no "next lane" to join to there.
   const glueWidth = (needsGlueZone && !isVeryLastLane) ? LANE_GLUE_MM : 0;
+  // Every lane EXCEPT the very first one needs a matching RECEIVING zone
+  // at its own start — blank tape the same length as the previous lane's
+  // trailing glue zone. Without this, the previous strip's glued overlap
+  // would land on top of this lane's real clock/data content (or its
+  // trailer), instead of on blank tape meant to receive it.
+  const receivingWidth = isVeryFirstLane ? 0 : LANE_GLUE_MM;
   const n = laneRows.length;
   const contentWidth = n * ROW_PITCH_MM;
 
   // The lane only needs to be as wide as what it actually contains —
-  // leader (if any) + real row content + glue zone or trailer (if any) —
-  // not the full sheet-wide usableW. Drawing the background rect at
-  // usableW regardless of how many rows landed in this lane left a
-  // stretch of blank, functionally meaningless tape hanging off the end
-  // of every partially-filled lane, which is wasted paper and confusing
-  // to cut around (it wasn't a leader/trailer buffer, wasn't glue margin,
-  // and wasn't data — just print filler).
-  const actualLaneWidth = leaderWidth + contentWidth + glueWidth + trailerWidth;
+  // leader or receiving zone (if any) + real row content + glue zone or
+  // trailer (if any) — not the full sheet-wide usableW. Drawing the
+  // background rect at usableW regardless of how many rows landed in this
+  // lane left a stretch of blank, functionally meaningless tape hanging
+  // off the end of every partially-filled lane, which is wasted paper and
+  // confusing to cut around.
+  const actualLaneWidth = leaderWidth + receivingWidth + contentWidth + glueWidth + trailerWidth;
 
   // tape background band — sized to exactly what this lane holds
   laneG.appendChild(svgEl("rect", {
@@ -330,21 +375,24 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
   // Row i=0 is always the chronologically-first row (the one the reader
   // meets earliest). In a normal lane it's drawn on the left; in a
   // reversed (serpentine fold-back) lane it's drawn on the right instead.
-  // The leader buffer must sit before row i=0 in READING order, and the
-  // trailer/glue zone must sit after row i=(n-1) in reading order — so
-  // both need to flip sides along with the lane's own direction, not just
-  // the leader.
+  // The leader/receiving zone must sit before row i=0 in READING order,
+  // and the trailer/glue zone must sit after row i=(n-1) in reading order
+  // — so all of these need to flip sides along with the lane's own
+  // direction.
   //
   // Positions are anchored to actualLaneWidth (this lane's own real
   // width), not the sheet-wide usableW, so a reversed lane's content sits
   // flush against this lane's own right edge rather than the full sheet
   // width regardless of how short the lane's content is.
-  const leaderPageX = reverse ? (actualLaneWidth - leaderWidth) : 0;
-  const trailingZonePageX = reverse ? 0 : (leaderWidth + contentWidth);
-  const rowOriginOffset = reverse ? (actualLaneWidth - leaderWidth - contentWidth) : leaderWidth;
+  const leadingZoneWidth = leaderWidth + receivingWidth; // exactly one of these is ever nonzero
+  const leadingZonePageX = reverse ? (actualLaneWidth - leadingZoneWidth) : 0;
+  const trailingZonePageX = reverse ? 0 : (leadingZoneWidth + contentWidth);
+  const rowOriginOffset = reverse ? (actualLaneWidth - leadingZoneWidth - contentWidth) : leadingZoneWidth;
 
   if (isVeryFirstLane) {
-    drawBuffer(laneG, leaderPageX, leaderWidth, reverse, "leader");
+    drawBuffer(laneG, leadingZonePageX, leaderWidth, reverse, "leader");
+  } else if (receivingWidth > 0) {
+    drawGlueZone(laneG, leadingZonePageX, receivingWidth, reverse);
   }
 
   for (let i = 0; i < n; i++) {
@@ -559,44 +607,26 @@ function buildRowList(bytes) {
 // and — for overlap join mode — repeating the final byte of each sheet as
 // the first (dimmed) byte of the next sheet, so gluing that repeated byte
 // over its printed twin keeps pitch continuous with zero gap.
+//
+// Sheet capacity is derived from planLanes (the same lane-planning logic
+// renderSheetSVG uses), by summing how many rows fit across that sheet's
+// lanes — so the two can never disagree about how many rows land where.
+//
+// sheetPhysicalCapacity answers "how many total row-slots does a sheet
+// with this geometry have, independent of how much content exists?" — it
+// passes an effectively-unlimited totalRowsAvailable into planLanes so the
+// content amount never clamps the result; the returned number is a
+// property of the PAPER, not of any particular message.
+
+function sheetPhysicalCapacity(usableW, usableH, isFirstSheet, isLastSheet) {
+  const effectivelyUnlimited = 1000000;
+  const { lanes } = planLanes(effectivelyUnlimited, usableW, usableH, isFirstSheet, isLastSheet);
+  return lanes.reduce((sum, lane) => sum + lane.rowCount, 0);
+}
 
 function splitIntoSheets(rows, paper, marginMm, joinMode) {
   const usableW = paper.w - marginMm * 2;
   const usableH = paper.h - marginMm * 2;
-  const laneGap = 6;
-  const laneHeight = TAPE_WIDTH_MM + laneGap;
-  const numLanes = Math.max(1, Math.floor((usableH + laneGap) / laneHeight));
-  // Every lane except the tape's very last one reserves LANE_GLUE_MM at its
-  // end for gluing the next lane's start onto after the sheet is cut apart
-  // at that fold — this must match renderSheetSVG's rowsPerLaneNormal
-  // exactly, or the two would disagree about how many rows fit per lane.
-  const rowsPerLane = Math.max(1, Math.floor((usableW - LANE_GLUE_MM) / ROW_PITCH_MM));
-
-  // rows per lane must be a multiple of BYTE_ROWS so lanes themselves don't
-  // split a byte across the serpentine fold
-  const rowsPerLaneAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLane / BYTE_ROWS) * BYTE_ROWS);
-
-  // The very first lane of the very first sheet ALSO reserves space for
-  // the leader buffer, on top of its own trailing glue zone, so it holds
-  // fewer rows still. If the WHOLE tape is short enough to end within that
-  // same lane, the trailer lands there too (replacing the glue zone, since
-  // there's no next lane to join to) and it needs the doubly-reduced
-  // (leader+trailer, no glue) capacity instead. All of these must match
-  // renderSheetSVG's equivalent values exactly, or the two would disagree
-  // about how many rows fit on sheet 1 and rows would go missing or
-  // overlap between sheets.
-  const rowsPerLaneWithLeader = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM - LANE_GLUE_MM) / ROW_PITCH_MM));
-  const rowsPerLaneWithLeaderAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeader / BYTE_ROWS) * BYTE_ROWS);
-  const rowsPerLaneWithBoth = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM * 2) / ROW_PITCH_MM));
-  const rowsPerLaneWithBothAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithBoth / BYTE_ROWS) * BYTE_ROWS);
-
-  const rowsPerSheet = rowsPerLaneAligned * numLanes;
-  // First-sheet capacity assuming the tape continues past this sheet
-  // (leader only affects lane 0; every other lane is normal capacity)
-  const rowsPerFirstSheetContinuing = rowsPerLaneWithLeaderAligned + rowsPerLaneAligned * (numLanes - 1);
-  // First-sheet capacity assuming the WHOLE tape fits in this one sheet
-  // (both leader and trailer could land in lane 0, if everything fits there)
-  const rowsPerFirstSheetIfAlsoLast = rowsPerLaneWithBothAligned + rowsPerLaneAligned * (numLanes - 1);
 
   const sheets = [];
   let cursor = 0;
@@ -606,15 +636,24 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
     let sheetRows;
     let freshCount;
     const isVeryFirstSheet = sheets.length === 0;
+    const remainingRows = rows.length - cursor;
+    // How many of this sheet's slots get consumed by repeating the
+    // previous sheet's overlap tail rather than fresh content (0 for the
+    // very first sheet, which has no previous sheet to repeat from).
+    const overlapSourceLen = isVeryFirstSheet ? 0 : Math.min(overlapRows, cursor);
 
-    // For the very first sheet, we don't yet know if it's also the last
-    // sheet until we see how much fits. If the ENTIRE remaining tape is
-    // short enough to fit within the "both buffers in lane 0" capacity,
-    // treat this as a first-and-last sheet; otherwise use the
-    // leader-only capacity and let the tape continue onto more sheets.
-    const capacityForThisSheet = isVeryFirstSheet
-      ? (rows.length - cursor <= rowsPerFirstSheetIfAlsoLast ? rowsPerFirstSheetIfAlsoLast : rowsPerFirstSheetContinuing)
-      : rowsPerSheet;
+    // A sheet's physical capacity (total row-slots) is fixed by its
+    // geometry, independent of the message — compute it once for both
+    // hypotheses ("this is the last sheet" vs "the tape continues past
+    // it"), then see how many FRESH rows that leaves room for once the
+    // repeated overlap tail's slots are subtracted.
+    const physicalCapacityIfLast = sheetPhysicalCapacity(usableW, usableH, isVeryFirstSheet, true);
+    const freshCapacityIfLast = physicalCapacityIfLast - overlapSourceLen;
+    const isThisSheetLast = remainingRows <= freshCapacityIfLast;
+
+    const capacityForThisSheet = isThisSheetLast
+      ? physicalCapacityIfLast
+      : sheetPhysicalCapacity(usableW, usableH, isVeryFirstSheet, false);
 
     if (isVeryFirstSheet) {
       sheetRows = rows.slice(cursor, cursor + capacityForThisSheet);
@@ -649,8 +688,6 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
 
     sheets.push({
       rows: sheetRows,
-      rowsPerLane: rowsPerLaneAligned,
-      numLanes,
       leadOverlapRows: sheets.length === 0 ? 0 : overlapRows
     });
   }
