@@ -68,6 +68,16 @@ const ROW_PITCH_MM      = CLOCK_LEAD_MM + HOLE_DIAM_MM + 0.5;  // ≈ 9.155 mm
 const BUFFER_LENGTH_MM     = 30;   // plain feed length at each end of the tape
 const BUFFER_LABEL_SIZE_MM = 2.6;  // font size for the CLOCK/DATA buffer labels
 
+// Lane glue zone: a plain, blank stretch of tape (no holes) inserted at
+// EVERY lane-to-lane fold within a sheet — not just the very start/end of
+// the whole tape. When a printed sheet gets cut apart at each fold and the
+// resulting strips are joined back into one continuous tape, this is the
+// blank material you actually glue or tape the overlapping ends onto.
+// Adjustable by the user (mm input in the UI) since how much overlap
+// material is comfortable depends on the person's glue/tape and how
+// precisely they can align two cut edges by hand.
+let LANE_GLUE_MM = 15;  // default length of blank tape reserved at each lane fold
+
 // ---------- Paper sizes (mm) ----------
 const PAPER = {
   letter: { w: 215.9, h: 279.4, name: "US Letter" },
@@ -216,17 +226,20 @@ function renderSheetSVG(opts) {
   const laneHeight = TAPE_WIDTH_MM + laneGap;
   const numLanes = Math.max(1, Math.floor((usableH + laneGap) / laneHeight));
 
-  // How many rows fit per lane, along the row pitch. The very first lane of
-  // the very first sheet reserves space for the leader buffer, and if the
-  // WHOLE tape is short enough to also end within that same lane, it needs
-  // space for the trailer too. Row counts are rounded DOWN to a multiple
-  // of BYTE_ROWS so a lane fold never lands mid-byte — this must match
-  // splitIntoSheets' math exactly, or the two would disagree about how
-  // many rows fit per sheet and rows would be dropped or duplicated
-  // across a sheet boundary.
-  const rowsPerLaneNormalRaw = Math.max(1, Math.floor(usableW / ROW_PITCH_MM));
+  // How many rows fit per lane, along the row pitch. Every lane EXCEPT the
+  // very last lane of the whole tape reserves LANE_GLUE_MM at its end —
+  // that's the blank tape you'll actually glue the next lane's start onto
+  // once the sheet is cut apart at each fold. The very first lane of the
+  // very first sheet ALSO reserves space for the leader buffer at its
+  // start, and if the WHOLE tape is short enough to end within that same
+  // lane, it needs the trailer instead of a glue zone at its end. Row
+  // counts are rounded DOWN to a multiple of BYTE_ROWS so a lane fold
+  // never lands mid-byte — this must match splitIntoSheets' math exactly,
+  // or the two would disagree about how many rows fit per sheet and rows
+  // would be dropped or duplicated across a sheet boundary.
+  const rowsPerLaneNormalRaw = Math.max(1, Math.floor((usableW - LANE_GLUE_MM) / ROW_PITCH_MM));
   const rowsPerLaneNormal = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneNormalRaw / BYTE_ROWS) * BYTE_ROWS);
-  const rowsPerLaneWithLeaderRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM) / ROW_PITCH_MM));
+  const rowsPerLaneWithLeaderRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM - LANE_GLUE_MM) / ROW_PITCH_MM));
   const rowsPerLaneWithLeader = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeaderRaw / BYTE_ROWS) * BYTE_ROWS);
   const rowsPerLaneWithBothRaw = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM * 2) / ROW_PITCH_MM));
   const rowsPerLaneWithBoth = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithBothRaw / BYTE_ROWS) * BYTE_ROWS);
@@ -259,8 +272,13 @@ function renderSheetSVG(opts) {
     // consumes the remaining rows
     const isVeryLastLane = isLastSheet && (rowCursor + laneRows.length >= rows.length);
 
+    // A glue zone is added after this lane's content UNLESS it's the very
+    // last lane of the whole tape (which gets a trailer instead, or
+    // nothing, not a glue zone — there's no "next lane" to join to).
+    const needsGlueZone = !isVeryLastLane;
+
     drawLane(g, laneRows, laneY, usableW, reverse, rowCursor, joinMode, leadOverlapRows,
-             isFirstSheet, isVeryFirstLane, isVeryLastLane);
+             isFirstSheet, isVeryFirstLane, isVeryLastLane, needsGlueZone);
 
     rowCursor += laneRows.length;
     laneIndex++;
@@ -278,24 +296,30 @@ function renderSheetSVG(opts) {
 }
 
 function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode, leadOverlapRows,
-                   isFirstSheet, isVeryFirstLane, isVeryLastLane) {
+                   isFirstSheet, isVeryFirstLane, isVeryLastLane, needsGlueZone) {
   const laneG = svgEl("g", { transform: `translate(0, ${laneY})` });
   g.appendChild(laneG);
 
   const leaderWidth = isVeryFirstLane ? BUFFER_LENGTH_MM : 0;
   const trailerWidth = isVeryLastLane ? BUFFER_LENGTH_MM : 0;
+  // A glue zone is blank tape appended after this lane's content, reserved
+  // for gluing/taping the next lane's start onto once the sheet is cut
+  // apart at this fold. It never coexists with a trailer — the very last
+  // lane of the whole tape gets a trailer (or nothing) instead, since
+  // there's no "next lane" to join to there.
+  const glueWidth = (needsGlueZone && !isVeryLastLane) ? LANE_GLUE_MM : 0;
   const n = laneRows.length;
   const contentWidth = n * ROW_PITCH_MM;
 
   // The lane only needs to be as wide as what it actually contains —
-  // leader (if any) + real row content + trailer (if any) — not the full
-  // sheet-wide usableW. Drawing the background rect at usableW regardless
-  // of how many rows landed in this lane left a stretch of blank,
-  // functionally meaningless tape hanging off the end of every
-  // partially-filled lane, which is wasted paper and confusing to cut
-  // around (it isn't a leader/trailer buffer, isn't glue margin, and
-  // isn't data — just print filler).
-  const actualLaneWidth = leaderWidth + contentWidth + trailerWidth;
+  // leader (if any) + real row content + glue zone or trailer (if any) —
+  // not the full sheet-wide usableW. Drawing the background rect at
+  // usableW regardless of how many rows landed in this lane left a
+  // stretch of blank, functionally meaningless tape hanging off the end
+  // of every partially-filled lane, which is wasted paper and confusing
+  // to cut around (it wasn't a leader/trailer buffer, wasn't glue margin,
+  // and wasn't data — just print filler).
+  const actualLaneWidth = leaderWidth + contentWidth + glueWidth + trailerWidth;
 
   // tape background band — sized to exactly what this lane holds
   laneG.appendChild(svgEl("rect", {
@@ -307,15 +331,16 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
   // meets earliest). In a normal lane it's drawn on the left; in a
   // reversed (serpentine fold-back) lane it's drawn on the right instead.
   // The leader buffer must sit before row i=0 in READING order, and the
-  // trailer must sit after row i=(n-1) in reading order — so both need to
-  // flip sides along with the lane's own direction, not just the leader.
+  // trailer/glue zone must sit after row i=(n-1) in reading order — so
+  // both need to flip sides along with the lane's own direction, not just
+  // the leader.
   //
-  // Positions are now anchored to actualLaneWidth (this lane's own real
+  // Positions are anchored to actualLaneWidth (this lane's own real
   // width), not the sheet-wide usableW, so a reversed lane's content sits
   // flush against this lane's own right edge rather than the full sheet
   // width regardless of how short the lane's content is.
   const leaderPageX = reverse ? (actualLaneWidth - leaderWidth) : 0;
-  const trailerPageX = reverse ? 0 : (leaderWidth + contentWidth);
+  const trailingZonePageX = reverse ? 0 : (leaderWidth + contentWidth);
   const rowOriginOffset = reverse ? (actualLaneWidth - leaderWidth - contentWidth) : leaderWidth;
 
   if (isVeryFirstLane) {
@@ -342,8 +367,38 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
   }
 
   if (isVeryLastLane) {
-    drawBuffer(laneG, trailerPageX, trailerWidth, reverse, "trailer");
+    drawBuffer(laneG, trailingZonePageX, trailerWidth, reverse, "trailer");
+  } else if (glueWidth > 0) {
+    drawGlueZone(laneG, trailingZonePageX, glueWidth, reverse);
   }
+}
+
+// Draws a plain, feature-free stretch of tape (no clock hole, no data
+// circle) at a lane-to-lane fold — the blank material you glue or tape
+// the next lane's start onto once the sheet is cut apart at this fold.
+// Unlike the leader/trailer buffer, this repeats at every fold and carries
+// no CLOCK/DATA labels (it's a mechanical join aid, not a feed/orientation
+// aid), just a light marking so it reads clearly as "glue here" rather
+// than looking like a mistake.
+function drawGlueZone(laneG, startX, widthMm, reverse) {
+  if (widthMm <= 0) return;
+
+  const zoneG = svgEl("g", {});
+  laneG.appendChild(zoneG);
+
+  // dashed divider marking where real data ends and the glue zone begins
+  zoneG.appendChild(svgEl("line", {
+    x1: startX, y1: 0, x2: startX, y2: TAPE_WIDTH_MM,
+    stroke: "#8a5a12", "stroke-width": 0.25, "stroke-dasharray": "1,1"
+  }));
+
+  const textX = startX + widthMm / 2;
+  const label = svgEl("text", {
+    x: textX, y: TAPE_WIDTH_MM / 2 + 1,
+    "font-size": 2.3, "font-family": "monospace", fill: "#8a5a12", "text-anchor": "middle"
+  });
+  label.textContent = "glue";
+  zoneG.appendChild(label);
 }
 
 // Draws a plain, feature-free stretch of tape (no clock hole, no data
@@ -511,20 +566,26 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
   const laneGap = 6;
   const laneHeight = TAPE_WIDTH_MM + laneGap;
   const numLanes = Math.max(1, Math.floor((usableH + laneGap) / laneHeight));
-  const rowsPerLane = Math.max(1, Math.floor(usableW / ROW_PITCH_MM));
+  // Every lane except the tape's very last one reserves LANE_GLUE_MM at its
+  // end for gluing the next lane's start onto after the sheet is cut apart
+  // at that fold — this must match renderSheetSVG's rowsPerLaneNormal
+  // exactly, or the two would disagree about how many rows fit per lane.
+  const rowsPerLane = Math.max(1, Math.floor((usableW - LANE_GLUE_MM) / ROW_PITCH_MM));
 
   // rows per lane must be a multiple of BYTE_ROWS so lanes themselves don't
   // split a byte across the serpentine fold
   const rowsPerLaneAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLane / BYTE_ROWS) * BYTE_ROWS);
 
-  // The very first lane of the very first sheet reserves space for the
-  // leader buffer, so it holds fewer rows than a normal lane. If the WHOLE
-  // tape is short enough to end within that same lane, the trailer lands
-  // there too and it needs the doubly-reduced capacity instead. Both must
-  // match renderSheetSVG's equivalent values exactly, or the two would
-  // disagree about how many rows fit on sheet 1 and rows would go missing
-  // or overlap between sheets.
-  const rowsPerLaneWithLeader = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM) / ROW_PITCH_MM));
+  // The very first lane of the very first sheet ALSO reserves space for
+  // the leader buffer, on top of its own trailing glue zone, so it holds
+  // fewer rows still. If the WHOLE tape is short enough to end within that
+  // same lane, the trailer lands there too (replacing the glue zone, since
+  // there's no next lane to join to) and it needs the doubly-reduced
+  // (leader+trailer, no glue) capacity instead. All of these must match
+  // renderSheetSVG's equivalent values exactly, or the two would disagree
+  // about how many rows fit on sheet 1 and rows would go missing or
+  // overlap between sheets.
+  const rowsPerLaneWithLeader = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM - LANE_GLUE_MM) / ROW_PITCH_MM));
   const rowsPerLaneWithLeaderAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithLeader / BYTE_ROWS) * BYTE_ROWS);
   const rowsPerLaneWithBoth = Math.max(1, Math.floor((usableW - BUFFER_LENGTH_MM * 2) / ROW_PITCH_MM));
   const rowsPerLaneWithBothAligned = Math.max(BYTE_ROWS, Math.floor(rowsPerLaneWithBoth / BYTE_ROWS) * BYTE_ROWS);
@@ -607,6 +668,7 @@ function rebuild() {
   const paper = PAPER[paperKey];
   const marginMm = parseFloat(document.getElementById("sheet-margin").value) || 12;
   const joinMode = document.querySelector('input[name="joinmode"]:checked').value;
+  LANE_GLUE_MM = Math.max(0, parseFloat(document.getElementById("lane-glue").value) || 0);
 
   const rows = buildRowList(bytes);
   const sheetsData = rows.length > 0 ? splitIntoSheets(rows, paper, marginMm, joinMode) : [];
@@ -703,7 +765,7 @@ function setupUI() {
 
   // live-ish rebuild on key field changes (not on every keystroke of text to
   // avoid thrashing while typing a long message — rebuild button covers that)
-  ["paper-size", "sheet-margin", "fixed-length", "fixed-length-unit",
+  ["paper-size", "sheet-margin", "lane-glue", "fixed-length", "fixed-length-unit",
    "pattern-byte", "pattern-count"].forEach(id => {
     document.getElementById(id).addEventListener("change", rebuild);
   });

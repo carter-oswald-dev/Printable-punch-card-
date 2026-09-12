@@ -93,3 +93,22 @@ the same lane, the tool automatically reduces how many data rows go in
 that lane so the two buffers and the real data all fit without
 overlapping — you may see a short message wrap onto a second lane earlier
 than expected as a result.
+
+## Lane glue zone
+
+Every fold within a sheet — the point where one printed row of tape ends
+and the next one (below it, on the same sheet) begins — gets a blank
+stretch of tape reserved at its end, marked "glue." This is the material
+you actually cut to and glue the next lane's start onto once the sheet
+is cut apart into strips and reassembled into one continuous tape.
+
+This is separate from the feed buffer above (which only appears once, at
+the true start/end of the whole tape) and separate from the sheet-to-sheet
+join settings (which control how printed *pages* join together, not lanes
+within the same page).
+
+Adjustable in the UI ("Lane glue zone," default 15 mm) — set it to
+whatever amount of overlap is comfortable for your glue or tape and how
+precisely you can align two cut edges by hand. The very last lane of the
+whole tape never gets a glue zone (it gets the feed trailer instead, or
+nothing, since there's no next lane to join to).

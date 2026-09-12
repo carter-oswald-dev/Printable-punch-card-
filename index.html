@@ -415,6 +415,11 @@
         <input type="number" id="sheet-margin" value="12" min="5" max="25" step="1">
         <span class="field-hint">Margin in mm on every side of each printed sheet.</span>
       </label>
+      <label class="field">
+        <span class="field-label">Lane glue zone</span>
+        <input type="number" id="lane-glue" value="15" min="0" max="40" step="1">
+        <span class="field-hint">Blank tape (mm) left at every fold within a sheet — the material you glue the next fold's start onto once the sheet is cut apart. Separate from the sheet-to-sheet join below.</span>
+      </label>
       <label class="field" style="margin-bottom:0">
         <span class="field-label">Join style between sheets</span>
         <div class="radio-group" id="join-mode">
