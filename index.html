@@ -231,23 +231,23 @@
   }
 
   #sheets-scroll{
-    overflow-x:auto;
-    padding:1rem 0 .5rem;
+    padding:1rem;
     background:var(--paper-dim);
     border-radius:10px;
     border:1px solid var(--line);
   }
   #sheets{
     display:flex;
+    flex-direction:column;
+    align-items:center;
     gap:26px;
-    padding:0 1.2rem;
-    width:max-content;
   }
 
   .sheet{
     background:#fff;
     box-shadow:0 1px 4px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
-    flex:0 0 auto;
+    max-width:100%;
+    height:auto;
   }
 
   .sheet-label{
@@ -257,7 +257,20 @@
     text-align:center;
     margin-bottom:.35rem;
   }
-  .sheet-wrap{ display:flex; flex-direction:column; align-items:center; }
+  .sheet-wrap{ display:flex; flex-direction:column; align-items:center; width:100%; }
+
+  .pagination{
+    display:flex; align-items:center; justify-content:center; gap:.6rem;
+    margin-top:1rem; flex-wrap:wrap;
+  }
+  .pagination button{
+    background:#fff; border:1px solid var(--line); border-radius:6px;
+    padding:.4rem .8rem; font-family:var(--mono); font-size:.82rem; cursor:pointer;
+  }
+  .pagination button:hover{ border-color:var(--teal); }
+  .pagination button.active{ background:var(--teal-dark); color:#fff; border-color:var(--teal-dark); }
+  .pagination button:disabled{ opacity:.4; cursor:default; }
+  .pagination .page-info{ font-family:var(--mono); font-size:.78rem; color:var(--ink-soft); }
 
   /* legend */
   .legend{
@@ -462,6 +475,7 @@
     </div>
     <div id="sheets-scroll">
       <div id="sheets"></div>
+      <div class="pagination" id="pagination"></div>
     </div>
     <div class="legend">
       <span><span class="swatch" style="background:#E8A33D"></span> tape / paper</span>

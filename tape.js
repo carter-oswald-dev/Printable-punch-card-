@@ -660,6 +660,8 @@ function splitIntoSheets(rows, paper, marginMm, joinMode) {
 
 // ================= Rendering orchestration =================
 
+const SHEETS_PER_PAGE = 10;
+
 function rebuild() {
   const bytes = buildByteSequence();
   state.bytes = bytes;
@@ -673,31 +675,21 @@ function rebuild() {
   const rows = buildRowList(bytes);
   const sheetsData = rows.length > 0 ? splitIntoSheets(rows, paper, marginMm, joinMode) : [];
 
-  // ---- render screen preview ----
-  const container = document.getElementById("sheets");
-  container.innerHTML = "";
+  // Stash everything rebuild-page needs so pagination clicks can re-render
+  // the preview without recomputing the tape from scratch.
+  state.sheetsData = sheetsData;
+  state.paper = paper;
+  state.marginMm = marginMm;
+  state.joinMode = joinMode;
+  if (!state.currentPage) state.currentPage = 0;
+  const totalPages = Math.max(1, Math.ceil(sheetsData.length / SHEETS_PER_PAGE));
+  if (state.currentPage >= totalPages) state.currentPage = totalPages - 1;
 
-  sheetsData.forEach((sheetData, idx) => {
-    const wrap = document.createElement("div");
-    wrap.className = "sheet-wrap";
+  renderPreviewPage();
 
-    const lbl = document.createElement("div");
-    lbl.className = "sheet-label";
-    lbl.textContent = `Sheet ${idx + 1} / ${sheetsData.length}`;
-    wrap.appendChild(lbl);
-
-    const svg = renderSheetSVG({
-      sheetWmm: paper.w, sheetHmm: paper.h, marginMm,
-      rows: sheetData.rows,
-      sheetIndex: idx, totalSheets: sheetsData.length,
-      isFirstSheet: idx === 0, isLastSheet: idx === sheetsData.length - 1,
-      joinMode, leadOverlapRows: sheetData.leadOverlapRows
-    });
-    wrap.appendChild(svg);
-    container.appendChild(wrap);
-  });
-
-  // ---- render print copy (physical mm sizing, one per page) ----
+  // ---- render print copy (physical mm sizing, one per page, ALL sheets
+  // regardless of screen pagination — pagination is a screen-preview
+  // convenience only, printing always includes every sheet) ----
   const printRoot = document.getElementById("print-root");
   printRoot.innerHTML = "";
   sheetsData.forEach((sheetData, idx) => {
@@ -723,6 +715,93 @@ function rebuild() {
   document.getElementById("stat-length").textContent =
     lenMm >= 1000 ? `${(lenMm / 1000).toFixed(2)} m` : `${lenMm.toFixed(0)} mm`;
   document.getElementById("stat-sheets").textContent = sheetsData.length;
+}
+
+// Renders only the current page's slice of sheets into the screen preview,
+// plus the pagination control strip. Sheets stack vertically (no
+// horizontal scrolling) and each SVG scales down to fit the container via
+// CSS (max-width:100%), so a sheet's full physical width is always visible
+// without needing to scroll sideways — this also means every lane's
+// trailing content (glue zones, trailers) is always on-screen rather than
+// potentially clipped off to the right of a narrow viewport.
+function renderPreviewPage() {
+  const { sheetsData, paper, marginMm, joinMode } = state;
+  const container = document.getElementById("sheets");
+  container.innerHTML = "";
+
+  const totalPages = Math.max(1, Math.ceil(sheetsData.length / SHEETS_PER_PAGE));
+  const page = state.currentPage || 0;
+  const startIdx = page * SHEETS_PER_PAGE;
+  const endIdx = Math.min(sheetsData.length, startIdx + SHEETS_PER_PAGE);
+
+  for (let idx = startIdx; idx < endIdx; idx++) {
+    const sheetData = sheetsData[idx];
+    const wrap = document.createElement("div");
+    wrap.className = "sheet-wrap";
+
+    const lbl = document.createElement("div");
+    lbl.className = "sheet-label";
+    lbl.textContent = `Sheet ${idx + 1} / ${sheetsData.length}`;
+    wrap.appendChild(lbl);
+
+    const svg = renderSheetSVG({
+      sheetWmm: paper.w, sheetHmm: paper.h, marginMm,
+      rows: sheetData.rows,
+      sheetIndex: idx, totalSheets: sheetsData.length,
+      isFirstSheet: idx === 0, isLastSheet: idx === sheetsData.length - 1,
+      joinMode, leadOverlapRows: sheetData.leadOverlapRows
+    });
+    wrap.appendChild(svg);
+    container.appendChild(wrap);
+  }
+
+  renderPaginationControls(totalPages);
+}
+
+function renderPaginationControls(totalPages) {
+  const pager = document.getElementById("pagination");
+  pager.innerHTML = "";
+
+  if (totalPages <= 1) return; // nothing to paginate
+
+  const page = state.currentPage || 0;
+
+  const prevBtn = document.createElement("button");
+  prevBtn.textContent = "← Prev";
+  prevBtn.disabled = page === 0;
+  prevBtn.addEventListener("click", () => {
+    state.currentPage = Math.max(0, page - 1);
+    renderPreviewPage();
+  });
+  pager.appendChild(prevBtn);
+
+  // Numbered page buttons — fine at the sizes this tool realistically
+  // produces (sheets counts stay in the tens to low hundreds, so page
+  // counts stay small enough to show every page number directly).
+  for (let p = 0; p < totalPages; p++) {
+    const btn = document.createElement("button");
+    btn.textContent = String(p + 1);
+    if (p === page) btn.classList.add("active");
+    btn.addEventListener("click", () => {
+      state.currentPage = p;
+      renderPreviewPage();
+    });
+    pager.appendChild(btn);
+  }
+
+  const nextBtn = document.createElement("button");
+  nextBtn.textContent = "Next →";
+  nextBtn.disabled = page >= totalPages - 1;
+  nextBtn.addEventListener("click", () => {
+    state.currentPage = Math.min(totalPages - 1, page + 1);
+    renderPreviewPage();
+  });
+  pager.appendChild(nextBtn);
+
+  const info = document.createElement("span");
+  info.className = "page-info";
+  info.textContent = `(${SHEETS_PER_PAGE} sheets per page)`;
+  pager.appendChild(info);
 }
 
 // ================= UI wiring =================
