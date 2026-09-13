@@ -122,3 +122,17 @@ precisely you can align two cut edges by hand. The very first lane of the
 whole tape has a feed leader instead of a receiving zone (nothing comes
 before it), and the very last lane has a feed trailer instead of a glue
 zone (nothing comes after it) — every lane in between carries both.
+
+### Fold pairing labels
+
+Optional, on by default ("Number the glue folds" checkbox). Each fold
+gets a small matching pair of labels printed in its two glue zones — the
+trailing zone at fold *n* is labeled `nA`, and the matching receiving zone
+at the start of the next lane is labeled `nB`. Matching a strip to its
+correct neighbor becomes "glue the end marked 3A to the start marked 3B"
+instead of counting rows — useful once a tape spans enough strips that
+miscounting becomes a real risk. Numbering is continuous across the whole
+tape, including across sheet boundaries and across screen-preview pages,
+so a fold's two halves always carry the same number no matter how the
+tape happens to be paginated on screen. Turning the checkbox off reverts
+every zone to plain, unlabeled "glue" text.

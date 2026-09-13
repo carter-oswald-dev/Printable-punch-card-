@@ -433,6 +433,15 @@
         <input type="number" id="lane-glue" value="15" min="0" max="40" step="1">
         <span class="field-hint">Blank tape (mm) left at every fold within a sheet — the material you glue the next fold's start onto once the sheet is cut apart. Separate from the sheet-to-sheet join below.</span>
       </label>
+      <label class="field">
+        <span class="radio-opt" style="border:none; padding:0; margin:0">
+          <input type="checkbox" id="fold-labels" checked style="margin-top:.2rem; accent-color:var(--teal)">
+          <span>
+            <span class="opt-title">Number the glue folds</span>
+            <span class="opt-sub">Each fold gets a matching pair of small labels — "1A" on the end you glue from, "1B" on the start you glue onto — so strips can't be joined to the wrong neighbor.</span>
+          </span>
+        </span>
+      </label>
       <label class="field" style="margin-bottom:0">
         <span class="field-label">Join style between sheets</span>
         <div class="radio-group" id="join-mode">
@@ -484,6 +493,7 @@
       <span><span class="swatch" style="background:#fff; border:1px solid #999; border-radius:50%"></span> data cell left blank — bit = 0</span>
       <span><span class="swatch" style="background:#C2452D"></span> cut / fold line — always on a byte boundary</span>
       <span><span class="swatch" style="background:#E8A33D; border:1px dashed #8a5a12"></span> feed leader / trailer — blank, no holes, labeled CLOCK/DATA</span>
+      <span><span class="swatch" style="background:#E8A33D; border:1px dashed #8a5a12"></span> lane glue zone — blank, optionally numbered "1A"/"1B" pairs</span>
     </div>
   </section>
 </main>

@@ -78,6 +78,12 @@ const BUFFER_LABEL_SIZE_MM = 2.6;  // font size for the CLOCK/DATA buffer labels
 // precisely they can align two cut edges by hand.
 let LANE_GLUE_MM = 15;  // default length of blank tape reserved at each lane fold
 
+// Optional pairing labels ("1A"/"1B", "2A"/"2B", ...) printed on each fold's
+// two glue-zone halves so a person reassembling cut strips can match sides
+// by text instead of by counting rows. On by default; toggleable since not
+// everyone wants the extra print clutter.
+let SHOW_FOLD_LABELS = true;
+
 // ---------- Paper sizes (mm) ----------
 const PAPER = {
   letter: { w: 215.9, h: 279.4, name: "US Letter" },
@@ -275,6 +281,17 @@ function planLanes(totalRowsAvailable, usableW, usableH, isFirstSheet, isLastShe
   return { lanes, numLanes };
 }
 
+// How many folds (lane-to-lane glue joins) a sheet with this many rows and
+// this geometry would open. Used to compute the correct starting fold
+// number for a later sheet WITHOUT actually rendering the sheets before
+// it — needed because the screen preview only renders one page of sheets
+// at a time (see renderPreviewPage), but fold numbers must stay continuous
+// across the whole tape regardless of which page is currently shown.
+function countFoldsInSheet(totalRowsAvailable, usableW, usableH, isFirstSheet, isLastSheet) {
+  const { lanes } = planLanes(totalRowsAvailable, usableW, usableH, isFirstSheet, isLastSheet);
+  return lanes.reduce((count, lane) => count + ((lane.needsGlueZone && !lane.isVeryLastLane) ? 1 : 0), 0);
+}
+
 function renderSheetSVG(opts) {
   const {
     sheetWmm, sheetHmm, marginMm,
@@ -312,14 +329,42 @@ function renderSheetSVG(opts) {
   svg.appendChild(g);
 
   let rowCursor = 0;
+  // Fold numbering must be continuous across the WHOLE tape, not reset per
+  // sheet, so a person gluing sheet 3's strips can still tell which piece
+  // continues from sheet 2. foldNumberStart is passed in by the caller
+  // (which tracks the running total across all sheets); each lane that
+  // opens a new fold (i.e. has a trailing glue zone) consumes one number.
+  let foldNumber = opts.foldNumberStart || 1;
 
   lanes.forEach((lanePlan, laneIndex) => {
     const laneRows = rows.slice(rowCursor, rowCursor + lanePlan.rowCount);
-    const reverse = laneIndex % 2 === 1;
+    // Every lane always reads left-to-right: row 0 (chronologically first)
+    // at the left edge, the last row at the right edge. No alternating
+    // serpentine direction — that zigzag made adjacent lanes' start/end
+    // sides swap every other row, which reads as inconsistent even though
+    // it was a deliberate boustrophedon layout. The bit order itself is
+    // unaffected either way, since it comes from array position, not
+    // drawing direction.
+    const reverse = false;
     const laneY = laneIndex * laneHeight;
 
+    // This lane's own trailing glue zone (if any) is fold `foldNumber`,
+    // labeled "<n>A". The NEXT lane's receiving zone is the other half of
+    // that same fold, labeled "<n>B" — so the receiving-zone label a lane
+    // draws at its own start is always foldNumber - 1 (the fold opened by
+    // the PREVIOUS lane), never the current lane's own fold number.
+    const trailingFoldLabel = (SHOW_FOLD_LABELS && lanePlan.needsGlueZone && !lanePlan.isVeryLastLane) ? `${foldNumber}A` : null;
+    const receivingFoldLabel = (SHOW_FOLD_LABELS && !lanePlan.isVeryFirstLane) ? `${foldNumber - 1}B` : null;
+
     drawLane(g, laneRows, laneY, usableW, reverse, rowCursor, joinMode, leadOverlapRows,
-             isFirstSheet, lanePlan.isVeryFirstLane, lanePlan.isVeryLastLane, lanePlan.needsGlueZone);
+             isFirstSheet, lanePlan.isVeryFirstLane, lanePlan.isVeryLastLane, lanePlan.needsGlueZone,
+             trailingFoldLabel, receivingFoldLabel);
+
+    // Fold count must keep advancing even when labels are hidden, so that
+    // re-enabling the toggle later (or a later sheet's receiving label)
+    // still lines up correctly — increment on the underlying condition,
+    // not on whether a label string was actually produced.
+    if (lanePlan.needsGlueZone && !lanePlan.isVeryLastLane) foldNumber++;
 
     rowCursor += laneRows.length;
   });
@@ -332,11 +377,18 @@ function renderSheetSVG(opts) {
   label.textContent = `sheet ${sheetIndex + 1} of ${totalSheets} — print at 100% / actual size — 25mm tape`;
   svg.appendChild(label);
 
+  // Stashed rather than returned separately so existing callers that treat
+  // this function as "returns an SVG element" keep working unchanged; the
+  // next sheet's renderSheetSVG call reads this off the previous call's
+  // return value to keep fold numbering continuous across sheets.
+  svg._nextFoldNumber = foldNumber;
+
   return svg;
 }
 
 function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode, leadOverlapRows,
-                   isFirstSheet, isVeryFirstLane, isVeryLastLane, needsGlueZone) {
+                   isFirstSheet, isVeryFirstLane, isVeryLastLane, needsGlueZone,
+                   trailingFoldLabel, receivingFoldLabel) {
   const laneG = svgEl("g", { transform: `translate(0, ${laneY})` });
   g.appendChild(laneG);
 
@@ -392,7 +444,7 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
   if (isVeryFirstLane) {
     drawBuffer(laneG, leadingZonePageX, leaderWidth, reverse, "leader");
   } else if (receivingWidth > 0) {
-    drawGlueZone(laneG, leadingZonePageX, receivingWidth, reverse);
+    drawGlueZone(laneG, leadingZonePageX, receivingWidth, reverse, receivingFoldLabel);
   }
 
   for (let i = 0; i < n; i++) {
@@ -417,7 +469,7 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
   if (isVeryLastLane) {
     drawBuffer(laneG, trailingZonePageX, trailerWidth, reverse, "trailer");
   } else if (glueWidth > 0) {
-    drawGlueZone(laneG, trailingZonePageX, glueWidth, reverse);
+    drawGlueZone(laneG, trailingZonePageX, glueWidth, reverse, trailingFoldLabel);
   }
 }
 
@@ -426,9 +478,15 @@ function drawLane(g, laneRows, laneY, usableW, reverse, globalRowStart, joinMode
 // the next lane's start onto once the sheet is cut apart at this fold.
 // Unlike the leader/trailer buffer, this repeats at every fold and carries
 // no CLOCK/DATA labels (it's a mechanical join aid, not a feed/orientation
-// aid), just a light marking so it reads clearly as "glue here" rather
-// than looking like a mistake.
-function drawGlueZone(laneG, startX, widthMm, reverse) {
+// aid).
+//
+// foldLabel, when provided (e.g. "3A" or "3B"), is an optional pairing aid
+// so a person gluing strips back together can match sides by text instead
+// of by counting rows: both halves of fold #3 print "3", with "A" marking
+// the trailing (glue-onto-this) side and "B" marking the receiving
+// (glue-this-onto) side of the SAME fold. Falls back to the plain "glue"
+// label when no pairing number is given.
+function drawGlueZone(laneG, startX, widthMm, reverse, foldLabel) {
   if (widthMm <= 0) return;
 
   const zoneG = svgEl("g", {});
@@ -445,7 +503,7 @@ function drawGlueZone(laneG, startX, widthMm, reverse) {
     x: textX, y: TAPE_WIDTH_MM / 2 + 1,
     "font-size": 2.3, "font-family": "monospace", fill: "#8a5a12", "text-anchor": "middle"
   });
-  label.textContent = "glue";
+  label.textContent = foldLabel ? `glue ${foldLabel}` : "glue";
   zoneG.appendChild(label);
 }
 
@@ -708,6 +766,7 @@ function rebuild() {
   const marginMm = parseFloat(document.getElementById("sheet-margin").value) || 12;
   const joinMode = document.querySelector('input[name="joinmode"]:checked').value;
   LANE_GLUE_MM = Math.max(0, parseFloat(document.getElementById("lane-glue").value) || 0);
+  SHOW_FOLD_LABELS = document.getElementById("fold-labels").checked;
 
   const rows = buildRowList(bytes);
   const sheetsData = rows.length > 0 ? splitIntoSheets(rows, paper, marginMm, joinMode) : [];
@@ -729,6 +788,7 @@ function rebuild() {
   // convenience only, printing always includes every sheet) ----
   const printRoot = document.getElementById("print-root");
   printRoot.innerHTML = "";
+  let printFoldNumber = 1; // continuous across sheets, see renderSheetSVG
   sheetsData.forEach((sheetData, idx) => {
     const page = document.createElement("div");
     page.className = "print-page";
@@ -737,8 +797,10 @@ function rebuild() {
       rows: sheetData.rows,
       sheetIndex: idx, totalSheets: sheetsData.length,
       isFirstSheet: idx === 0, isLastSheet: idx === sheetsData.length - 1,
-      joinMode, leadOverlapRows: sheetData.leadOverlapRows
+      joinMode, leadOverlapRows: sheetData.leadOverlapRows,
+      foldNumberStart: printFoldNumber
     });
+    printFoldNumber = svg._nextFoldNumber;
     // physical size for print: 1mm = 1mm via CSS using mm units directly
     svg.setAttribute("width", `${paper.w}mm`);
     svg.setAttribute("height", `${paper.h}mm`);
@@ -771,6 +833,21 @@ function renderPreviewPage() {
   const startIdx = page * SHEETS_PER_PAGE;
   const endIdx = Math.min(sheetsData.length, startIdx + SHEETS_PER_PAGE);
 
+  const usableW = paper.w - marginMm * 2;
+  const usableH = paper.h - marginMm * 2;
+
+  // Fold numbers must stay continuous across the WHOLE tape even though
+  // only one page of sheets renders at a time — count folds from every
+  // sheet BEFORE this page (without re-rendering them) to find the right
+  // starting number for the first sheet actually shown here.
+  let foldNumber = 1;
+  for (let idx = 0; idx < startIdx; idx++) {
+    foldNumber += countFoldsInSheet(
+      sheetsData[idx].rows.length, usableW, usableH,
+      idx === 0, idx === sheetsData.length - 1
+    );
+  }
+
   for (let idx = startIdx; idx < endIdx; idx++) {
     const sheetData = sheetsData[idx];
     const wrap = document.createElement("div");
@@ -786,8 +863,10 @@ function renderPreviewPage() {
       rows: sheetData.rows,
       sheetIndex: idx, totalSheets: sheetsData.length,
       isFirstSheet: idx === 0, isLastSheet: idx === sheetsData.length - 1,
-      joinMode, leadOverlapRows: sheetData.leadOverlapRows
+      joinMode, leadOverlapRows: sheetData.leadOverlapRows,
+      foldNumberStart: foldNumber
     });
+    foldNumber = svg._nextFoldNumber;
     wrap.appendChild(svg);
     container.appendChild(wrap);
   }
@@ -881,7 +960,7 @@ function setupUI() {
 
   // live-ish rebuild on key field changes (not on every keystroke of text to
   // avoid thrashing while typing a long message — rebuild button covers that)
-  ["paper-size", "sheet-margin", "lane-glue", "fixed-length", "fixed-length-unit",
+  ["paper-size", "sheet-margin", "lane-glue", "fold-labels", "fixed-length", "fixed-length-unit",
    "pattern-byte", "pattern-count"].forEach(id => {
     document.getElementById(id).addEventListener("change", rebuild);
   });
